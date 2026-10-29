@@ -17,10 +17,9 @@ def _discovery_method():
 def _discovery_source():
     """The endpoint, the helper it shares with the semantic catalog, and the repository query that filters rows."""
     repository = ast.parse(REVISION_REPOSITORY_PATH.read_text(encoding="utf-8"))
-    approved_current = next(
-        node for node in ast.walk(repository) if isinstance(node, ast.FunctionDef) and node.name == "approved_current"
-    )
-    nodes = (_discovery_method(), module_function("discoverable_glossary_terms"), approved_current)
+    functions = (node for node in ast.walk(repository) if isinstance(node, ast.FunctionDef))
+    serving = next(node for node in functions if node.name == "serving")
+    nodes = (_discovery_method(), module_function("discoverable_glossary_terms"), serving)
     return "\n".join(ast.unparse(node) for node in nodes)
 
 
@@ -39,18 +38,6 @@ class _DiscoveryResponseAPI:
         return status, payload
 
 
-class _RevisionQuery:
-    def __init__(self, revisions):
-        self.revisions = revisions
-
-    def filter_by(self, **kwargs):
-        assert kwargs == {"status": "approved", "is_current": True}
-        return self
-
-    def all(self):
-        return self.revisions
-
-
 def _discovery_handler(revisions, datasets, links_by_revision, allowed_dataset_ids):
     """Execute the real discovery handler, without importing Superset."""
     method = _discovery_method()
@@ -60,17 +47,13 @@ def _discovery_handler(revisions, datasets, links_by_revision, allowed_dataset_i
         name="HarnessAPI", bases=[ast.Name(id="RestApi", ctx=ast.Load())], keywords=[], body=[method], decorator_list=[]
     )
 
-    def query(model):
-        assert model is revision_model
-        return _RevisionQuery(revisions)
-
-    revision_model = object()
     namespace = {
         "RestApi": _DiscoveryResponseAPI,
         "Any": object,
-        "GlossaryTermRevision": revision_model,
         "SqlaTable": object,
-        "db": SimpleNamespace(session=SimpleNamespace(query=query, get=lambda _model, key: datasets.get(key))),
+        "db": SimpleNamespace(session=SimpleNamespace(get=lambda _model, key: datasets.get(key))),
+        # Which revision serves each term is the repository's choice, tested on SQLite in test_glossary_service.
+        "glossary_term_revision_repository": lambda: SimpleNamespace(serving=lambda: revisions),
         "ensure_dictionary_tables": lambda: None,
         "can_access_dataset": lambda dataset: dataset.id in allowed_dataset_ids,
         "glossary_link_fingerprint": lambda dataset, kind, target: f"{dataset.id}:{kind}:{getattr(target, 'id', '')}",
@@ -91,9 +74,9 @@ def test_discovery_is_authenticated_read_only_and_not_admin_gated():
     assert "is_admin" not in ast.unparse(method)
 
 
-def test_discovery_filters_to_approved_current_live_links_before_serialization():
+def test_discovery_filters_to_serving_live_links_before_serialization():
     source = _discovery_source()
-    assert "approved" in source and "is_current" in source
+    assert "'approved'" in source and "serving()" in source
     assert "fingerprint" in source.lower()
     assert "can_access_dataset" in source
     assert "links" in source
@@ -154,5 +137,5 @@ def test_drafts_ai_candidates_revoked_and_stale_objects_are_not_consumer_knowled
     source = _discovery_source()
     assert "draft" not in source or "!= 'draft'" in source or '!= "draft"' in source
     assert "revoked" not in source or "!= 'revoked'" in source or '!= "revoked"' in source
-    # AI provenance is permitted only after explicit approval, which the approved/current filter enforces.
-    assert "approved" in source and "is_current" in source
+    # Only an approved serving revision reaches consumers.
+    assert "'approved'" in source and "serving()" in source

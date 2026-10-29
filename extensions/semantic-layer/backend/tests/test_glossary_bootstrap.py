@@ -1,63 +1,6 @@
-from __future__ import annotations
+from types import SimpleNamespace
 
-import sys
-from types import ModuleType, SimpleNamespace
-
-import pytest
 from catalog_source import compile_into, module_function
-from sqlalchemy.exc import IntegrityError
-
-from text_to_bi.superset_semantic_layer.modules.glossary.services import glossary as service
-
-
-def _payload(**overrides):
-    return {
-        "canonical_name": "Revenue",
-        "definition": "Recognized revenue.",
-        "synonyms": [],
-        "provenance": "manual",
-        "links": [{"dataset_id": 7, "kind": "dataset"}],
-        **overrides,
-    }
-
-
-def test_raw_secret_like_source_reference_is_rejected():
-    with pytest.raises(service.GlossaryValidationError, match="Unsupported glossary fields"):
-        service.normalize_glossary_payload(_payload(source_reference="postgresql://admin:secret@db/internal"))
-
-
-def test_duplicate_canonical_name_flush_rolls_back_and_raises_conflict(monkeypatch):
-    class GlossaryTerm:
-        def __init__(self, **values):
-            self.__dict__.update(values)
-
-    models = ModuleType("text_to_bi.superset_semantic_layer.modules.glossary.models")
-    models.GlossaryTerm = GlossaryTerm
-    models.GlossaryTermAuditEvent = SimpleNamespace
-    models.GlossaryTermLink = SimpleNamespace
-    models.GlossaryTermRevision = SimpleNamespace
-    monkeypatch.setitem(sys.modules, models.__name__, models)
-
-    class Session:
-        def __init__(self):
-            self.rolled_back = False
-
-        def query(self, _model):
-            return SimpleNamespace(filter_by=lambda **_values: SimpleNamespace(one_or_none=lambda: None))
-
-        def add(self, _record):
-            pass
-
-        def flush(self):
-            raise IntegrityError("insert", {}, Exception("duplicate normalized name"))
-
-        def rollback(self):
-            self.rolled_back = True
-
-    session = Session()
-    with pytest.raises(service.GlossaryConflictError, match="canonical name"):
-        service.create_draft(session, _payload(), 1, lambda _dataset_id: None, lambda _user_id: True)
-    assert session.rolled_back
 
 
 def test_glossary_bootstrap_creates_parent_tables_before_children_with_checkfirst():
@@ -141,7 +84,7 @@ def _migration_namespace():
         "ExpertRuleAuditEvent",
         "DatasetProposal",
     )
-    namespace ={name: SimpleNamespace(__tablename__=name, __table__=Table(name)) for name in names}
+    namespace = {name: SimpleNamespace(__tablename__=name, __table__=Table(name)) for name in names}
     namespace.update(
         db=db,
         inspect=inspect,

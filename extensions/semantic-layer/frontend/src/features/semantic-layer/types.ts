@@ -165,7 +165,6 @@ export type MetricQueryFilter = { column: string; operator: MetricFilterOperator
 export type GlossaryStatus = 'draft' | 'approved' | 'revoked';
 /** Review state of a term: `outdated` is an approval whose linked column or metric changed since it was saved. */
 export type GlossaryState = GlossaryStatus | 'outdated';
-export type GlossaryProvenance = 'manual' | 'import' | 'ai_suggestion';
 export type GlossaryLink = {
   kind: 'dataset' | 'column' | 'metric';
   dataset_id: number;
@@ -181,7 +180,6 @@ export type GlossaryRevision = {
   canonical_name: string;
   definition: string;
   synonyms: string[];
-  provenance: GlossaryProvenance;
   status: GlossaryStatus;
   is_current: boolean;
   created_at?: string | null;
@@ -192,7 +190,6 @@ export type GlossaryRevision = {
 export type GlossaryTerm = {
   id: number;
   canonical_name: string;
-  owner_id: number | null;
   steward_id: number | null;
   current_revision?: GlossaryRevision | null;
   revisions?: GlossaryRevision[];
@@ -201,6 +198,9 @@ export type GlossaryTerm = {
 export type GlossaryReviewTerm = GlossaryTerm & {
   current_revision: GlossaryRevision;
   state: GlossaryState;
+  /** The approved revision the AI Agent still uses while an edit of it waits for review. */
+  serving_revision_number: number | null;
+  steward_name: string | null;
   author_id: number | null;
   author_name: string | null;
   approver_name: string | null;
@@ -208,6 +208,7 @@ export type GlossaryReviewTerm = GlossaryTerm & {
 };
 export type GlossaryTermList = {
   terms: GlossaryReviewTerm[];
+  users: MetricUser[];
   current_user_id: number | null;
   require_second_reviewer: boolean;
 };
@@ -231,9 +232,7 @@ export type GlossaryTermPayload = {
   canonical_name: string;
   definition: string;
   synonyms: string[];
-  owner_id: number | null;
   steward_id: number | null;
-  provenance: GlossaryProvenance;
   links: Array<Pick<GlossaryLink, 'kind' | 'dataset_id' | 'column_name' | 'metric_id'>>;
 };
 

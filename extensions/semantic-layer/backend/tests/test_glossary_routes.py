@@ -7,8 +7,8 @@ from text_to_bi.superset_semantic_layer.core.exceptions import AdminRequiredErro
 from text_to_bi.superset_semantic_layer.modules.glossary.exceptions import (
     GlossaryConflictError,
     GlossarySelfApprovalError,
-    GlossaryValidationError,
 )
+from text_to_bi.superset_semantic_layer.modules.glossary.services.validation import expected_revision_of
 
 ADMIN_ENDPOINTS = {
     "list_glossary": ("/glossary", "GET"),
@@ -50,17 +50,6 @@ class _GlossaryResponseAPI:
         return self.response(400, **payload)
 
 
-class _CurrentRevisionQuery:
-    def __init__(self, revision):
-        self.revision = revision
-
-    def filter_by(self, **_kwargs):
-        return self
-
-    def one_or_none(self):
-        return self.revision
-
-
 def _update_handler(payload, update_draft):
     """Compile the real handler with Superset's request/session boundary faked."""
     methods = api_methods()
@@ -74,30 +63,21 @@ def _update_handler(payload, update_draft):
         body=[handler],
         decorator_list=[],
     )
-    current = SimpleNamespace(revision_number=3, term=SimpleNamespace(id=7))
-    session = SimpleNamespace(
-        query=lambda _model: _CurrentRevisionQuery(current),
-        get=lambda *_args: None,
-        commit=lambda: None,
-        rollback=lambda: None,
-    )
+    commits = []
     namespace = {
         "RestApi": _GlossaryResponseAPI,
-        "GlossaryTermRevision": object,
-        "SqlaTable": object,
-        "db": SimpleNamespace(session=session),
+        "db": SimpleNamespace(session=SimpleNamespace(commit=lambda: commits.append(True), rollback=lambda: None)),
         "request": SimpleNamespace(get_json=lambda silent=True: payload),
         "current_user": SimpleNamespace(id=42),
         "ensure_dictionary_tables": lambda: None,
         "update_draft": update_draft,
+        "expected_revision_of": expected_revision_of,
         "require_admin": lambda: None,
     }
     compile_into(namespace, api)
     instance = namespace["HarnessAPI"]()
-    instance._glossary_user_exists = lambda _user_id: True
-    namespace["glossary_metric_approved"] = lambda _dataset, _metric: True
     instance._glossary_term = lambda term, revisions: {"id": term.id, "revisions": len(revisions)}
-    return instance, current, GlossaryValidationError, GlossaryConflictError
+    return instance, commits
 
 
 def _frontend_draft_payload(**overrides):
@@ -105,8 +85,6 @@ def _frontend_draft_payload(**overrides):
         "canonical_name": "Average temperature",
         "definition": "Mean recorded temperature.",
         "synonyms": ["mean temperature"],
-        "provenance": "manual",
-        "owner_id": 1,
         "steward_id": 2,
         "links": [{"kind": "dataset", "dataset_id": 7}],
         "expected_revision": 3,
@@ -143,36 +121,33 @@ def test_management_routes_delegate_to_governed_service_with_expected_revision_a
     assert "revoke" in ast.unparse(methods["revoke_glossary"])
 
 
-def test_update_draft_executes_frontend_payload_with_revision_token_separate_from_service_content():
+def test_update_draft_passes_the_frontend_payload_its_revision_token_and_the_actor_then_commits():
     received = {}
 
-    def update_draft(_session, current, payload, expected, actor_id, _dataset, _user, _metric_is_approved):
-        received.update(current=current, payload=payload, expected=expected, actor_id=actor_id)
+    def update_draft(term_id, payload, expected, actor_id):
+        received.update(term_id=term_id, payload=payload, expected=expected, actor_id=actor_id)
         return SimpleNamespace(term=SimpleNamespace(id=7))
 
-    api, current, _, _ = _update_handler(_frontend_draft_payload(), update_draft)
+    api, commits = _update_handler(_frontend_draft_payload(), update_draft)
     status, body = api.update_glossary_draft(7)
 
-    assert status == 200
+    assert status == 200 and commits == [True]
     assert body["term"] == {"id": 7, "revisions": 1}
-    assert received["current"] is current and received["expected"] == 3 and received["actor_id"] == 42
-    expected_payload = _frontend_draft_payload()
-    expected_payload.pop("expected_revision")
-    assert received["payload"] == expected_payload
-    assert "expected_revision" not in received["payload"]
+    assert received == {"term_id": 7, "payload": _frontend_draft_payload(), "expected": 3, "actor_id": 42}
 
 
-def test_update_draft_maps_service_conflict_to_409():
-    api, _, _, conflict_error = _update_handler(
-        _frontend_draft_payload(), lambda *_args: (_ for _ in ()).throw(conflict_error("stale revision"))
-    )
+def test_update_draft_maps_service_conflict_to_409_without_committing():
+    def update_draft(*_args):
+        raise GlossaryConflictError("stale revision")
+
+    api, commits = _update_handler(_frontend_draft_payload(), update_draft)
     status, body = api.update_glossary_draft(7)
-    assert (status, body) == (409, {"message": "stale revision"})
+    assert (status, body, commits) == (409, {"message": "stale revision"}, [])
 
 
 def test_update_draft_rejects_non_object_or_missing_revision_before_service_call():
     called = []
-    api, _, _, _ = _update_handler(None, lambda *_args: called.append(True))
+    api, _ = _update_handler(None, lambda *_args: called.append(True))
     status, body = api.update_glossary_draft(7)
     assert (status, body) == (400, {"message": "expected_revision is required."})
     assert called == []
@@ -204,8 +179,8 @@ def test_audit_is_admin_only_read_only_and_cannot_be_used_for_cross_term_id_look
 
 
 def test_approval_passes_the_second_reviewer_setting_and_answers_self_approval_with_403():
-    source = ast.unparse(api_methods()["_glossary_lifecycle"])
-    assert "second_reviewer_required()" in source
+    source = ast.unparse(api_methods()["approve_glossary"])
+    assert "second_reviewer_required()" in source and "review_reason(payload)" in source
     assert GlossarySelfApprovalError.status == 403 and "không thể tự duyệt" in GlossarySelfApprovalError.message
 
 
@@ -216,6 +191,9 @@ def test_list_reports_review_state_reviewers_and_the_second_reviewer_setting():
         "author_name",
         "approver_name",
         "revoker_name",
+        "serving_revision_number",
+        "steward_name",
+        "users",
         "current_user_id",
         "require_second_reviewer",
     ):

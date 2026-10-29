@@ -130,8 +130,17 @@ function TermHistory({ term, revision }: { term: GlossaryReviewTerm; revision: n
 
 function TermDetail({ term, historyRevision }: { term: GlossaryReviewTerm; historyRevision: number }) {
   const revision = term.current_revision;
+  const servingOlderRevision = term.state === 'draft' && term.serving_revision_number !== null;
   return (
     <div className="sl-metrics-definition" role="tabpanel">
+      {servingOlderRevision ? (
+        <p className="sl-metric-muted">
+          AI Agent vẫn dùng bản đã duyệt (phiên bản {term.serving_revision_number}) cho tới khi bản nháp này được duyệt.
+        </p>
+      ) : null}
+      <dl className="sl-metrics-facts">
+        <div><dt>Người phụ trách</dt><dd>{term.steward_name ?? 'Chưa chỉ định'}</dd></div>
+      </dl>
       <section className="sl-metrics-section">
         <h4>Định nghĩa</h4>
         <p className="sl-glossary-definition">{revision.definition}</p>
@@ -169,7 +178,7 @@ export function Glossary() {
   // Set when "Xử lý câu hỏi" sent the administrator here to cover a concept users defined for themselves.
   const [creation, setCreation] = useState<ConceptRequest | null>(() => takeConceptRequest('glossary'));
   const [termList, setTermList] = useState<GlossaryTermList>(
-    { terms: [], current_user_id: null, require_second_reviewer: false },
+    { terms: [], users: [], current_user_id: null, require_second_reviewer: false },
   );
   const [datasets, setDatasets] = useState<GlossaryDatasetOption[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -258,6 +267,8 @@ export function Glossary() {
   const state = selectedTerm?.state;
   const approvalBlocked = state === 'draft' && termList.require_second_reviewer
     && selectedTerm?.author_id === termList.current_user_id;
+  // An approved revision can be revoked even while an edit of it waits for review.
+  const revocable = selectedTerm != null && selectedTerm.serving_revision_number !== null;
   const editorTerm = editing === 'existing' ? selectedTerm : null;
   const isSelected = (term: GlossaryReviewTerm) => editing !== 'new' && selectedTerm?.id === term.id;
 
@@ -335,6 +346,7 @@ export function Glossary() {
               term={editorTerm}
               draft={creation && !editorTerm ? draftFromRequest(creation) : null}
               datasets={datasets}
+              users={termList.users}
               onCancel={closeEditor}
               onSaved={termId => void saveFromEditor(termId)}
             />
@@ -364,7 +376,7 @@ export function Glossary() {
                     <Check data-icon="inline-start" /> Duyệt
                   </Button>
                 ) : null}
-                {state === 'approved' || state === 'outdated' ? (
+                {revocable ? (
                   <Button variant="outline" disabled={deciding} onClick={() => setOpenDecision('revoke')}>
                     <Ban data-icon="inline-start" /> Thu hồi
                   </Button>

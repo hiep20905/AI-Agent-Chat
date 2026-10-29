@@ -5,11 +5,12 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { requestJson, semanticLayerApi } from './api';
 import { OptionSelect } from './ExpertRuleEditor';
-import type { GlossaryDatasetOption, GlossaryLink, GlossaryReviewTerm, GlossaryTermPayload } from './types';
+import type { GlossaryDatasetOption, GlossaryLink, GlossaryReviewTerm, GlossaryTermPayload, MetricUser } from './types';
 
 /** A link row: the dataset, then `dataset`, `column:<name>` or `metric:<id>` for what in it the term names. */
 type LinkDraft = { key: number; datasetId: string; target: string };
 
+const NO_STEWARD = 'none';
 let nextLinkKey = 1;
 const emptyLink = (): LinkDraft => ({ key: nextLinkKey++, datasetId: '', target: '' });
 
@@ -42,6 +43,7 @@ const GLOSSARY_ERRORS: Array<[string, string]> = [
   ['definition must be', 'Nhập định nghĩa.'],
   ['canonical_name must be', 'Nhập tên thuật ngữ.'],
   ['too long', 'Nội dung quá dài.'],
+  ['Unknown steward_id', 'Người phụ trách không còn tồn tại.'],
 ];
 
 /** Shows a backend glossary error in Vietnamese; messages the backend already writes in Vietnamese pass through. */
@@ -61,14 +63,16 @@ type GlossaryEditorProps = {
   term: GlossaryReviewTerm | null;
   draft?: GlossaryDraft | null;
   datasets: GlossaryDatasetOption[];
+  users: MetricUser[];
   onCancel: () => void;
   onSaved: (termId: number) => void;
 };
 
 /** Writes a new term or the next draft of an existing one; saving always leaves a draft to approve. */
-export function GlossaryEditor({ term, draft, datasets, onCancel, onSaved }: GlossaryEditorProps) {
+export function GlossaryEditor({ term, draft, datasets, users, onCancel, onSaved }: GlossaryEditorProps) {
   const revision = term?.current_revision ?? null;
   const [name, setName] = useState(term?.canonical_name ?? draft?.name ?? '');
+  const [stewardId, setStewardId] = useState(String(term?.steward_id ?? NO_STEWARD));
   const [definition, setDefinition] = useState(revision?.definition ?? draft?.definition ?? '');
   const [synonyms, setSynonyms] = useState((revision?.synonyms ?? draft?.synonyms ?? []).join(', '));
   const [links, setLinks] = useState<LinkDraft[]>(() => {
@@ -85,6 +89,10 @@ export function GlossaryEditor({ term, draft, datasets, onCancel, onSaved }: Glo
   const [saveError, setSaveError] = useState('');
 
   const datasetItems = datasets.map(dataset => ({ value: String(dataset.id), label: dataset.name }));
+  const stewardItems = [
+    { value: NO_STEWARD, label: 'Chưa chỉ định' },
+    ...users.map(user => ({ value: String(user.id), label: user.name })),
+  ];
   const targetItems = (datasetId: string) => {
     const dataset = datasets.find(item => String(item.id) === datasetId);
     if (!dataset) return [];
@@ -108,9 +116,7 @@ export function GlossaryEditor({ term, draft, datasets, onCancel, onSaved }: Glo
       canonical_name: name.trim(),
       definition: definition.trim(),
       synonyms: synonyms.split(',').map(value => value.trim()).filter(Boolean),
-      owner_id: term?.owner_id ?? null,
-      steward_id: term?.steward_id ?? null,
-      provenance: revision?.provenance ?? 'manual',
+      steward_id: stewardId === NO_STEWARD ? null : Number(stewardId),
       links: filledLinks.map(buildLink),
     };
     setSaving(true);
@@ -159,6 +165,8 @@ export function GlossaryEditor({ term, draft, datasets, onCancel, onSaved }: Glo
           placeholder="Cách nhau bởi dấu phẩy, ví dụ: trời nóng, oi bức"
           onChange={event => setSynonyms(event.target.value)}
         />
+        <span className="sl-metric-trial-label">Người phụ trách</span>
+        <OptionSelect label="Người phụ trách" items={stewardItems} value={stewardId} onChange={setStewardId} />
         <span className="sl-metric-trial-label">Liên kết</span>
         <div className="sl-metric-trial-field is-stacked">
           {links.map(link => (

@@ -141,6 +141,14 @@ def _migrate_dictionary_tables():
             connection.execute(
                 text("ALTER TABLE text_to_bi_metric_contract ADD COLUMN origin VARCHAR(16) NOT NULL DEFAULT 'manual'")
             )
+        # Glossary fields nothing ever filled: a revision's provenance and import source. The term's unused, nullable
+        # owner_id stays: dropping it drops its foreign key, which waits on ab_user that the calling request has read.
+        revision_columns = {
+            column["name"] for column in inspect(connection).get_columns(GlossaryTermRevision.__tablename__)
+        }
+        for column_name in ("provenance", "source_reference", "source_hash"):
+            if column_name in revision_columns:
+                connection.execute(text(f"ALTER TABLE text_to_bi_glossary_term_revision DROP COLUMN {column_name}"))
         if postgres:
             contract_constraints = inspect(connection).get_foreign_keys(MetricContract.__tablename__)
             has_revoker_fk = any(

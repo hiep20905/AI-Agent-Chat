@@ -69,7 +69,7 @@ class ExpertRuleAPI(RestApi):
 
     @staticmethod
     def _glossary(term_id: int):
-        revision = glossary_term_revision_repository().approved_current_for(term_id)
+        revision = glossary_term_revision_repository().serving_for(term_id)
         if revision is None:
             return None
         # A term may describe multiple datasets. Resolve deterministically and
@@ -81,7 +81,8 @@ class ExpertRuleAPI(RestApi):
                 (),
                 {
                     "status": revision.status,
-                    "is_current": revision.is_current,
+                    # The serving revision stays current for a rule while an edit of the term waits for review.
+                    "is_current": True,
                     "dataset_id": link.dataset_id,
                     "content_hash": revision.content_hash,
                     "fingerprint": link.fingerprint,
@@ -312,8 +313,8 @@ class ExpertRuleAPI(RestApi):
         return "approved" if live else "outdated"
 
     def _term_links(self, term_id: int, dataset_id: int) -> list[GlossaryTermLink]:
-        """The approved current revision's links of a term into one dataset."""
-        revision = glossary_term_revision_repository().approved_current_for(term_id)
+        """The serving revision's links of a term into one dataset."""
+        revision = glossary_term_revision_repository().serving_for(term_id)
         if revision is None:
             return []
         return glossary_term_link_repository().for_revision_dataset(revision.id, dataset_id)
@@ -409,7 +410,7 @@ class ExpertRuleAPI(RestApi):
         require_admin()
         terms_by_dataset: dict[int, list[dict[str, Any]]] = {}
         link_repository = glossary_term_link_repository()
-        for revision in glossary_term_revision_repository().approved_current():
+        for revision in glossary_term_revision_repository().serving():
             links = link_repository.for_revision(revision.id)
             for dataset_id in {link.dataset_id for link in links}:
                 dataset_links = [link for link in links if link.dataset_id == dataset_id]

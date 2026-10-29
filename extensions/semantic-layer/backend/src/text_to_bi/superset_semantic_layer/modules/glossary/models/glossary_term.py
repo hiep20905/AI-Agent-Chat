@@ -26,7 +26,6 @@ class GlossaryTerm(AuditedModel):
     id = Column(Integer, primary_key=True)
     canonical_name = Column(String(255), nullable=False)
     normalized_name = Column(String(255), nullable=False, index=True)
-    owner_id = Column(Integer, ForeignKey("ab_user.id", ondelete="SET NULL"), nullable=True, index=True)
     steward_id = Column(Integer, ForeignKey("ab_user.id", ondelete="SET NULL"), nullable=True, index=True)
 
 
@@ -45,9 +44,6 @@ class GlossaryTermRevision(AuditedModel):
     revision_number = Column(Integer, nullable=False)
     definition = Column(Text, nullable=False)
     synonyms = Column(JSON, nullable=False, default=list)
-    provenance = Column(String(32), nullable=False, default="manual")
-    source_reference = Column(String(512), nullable=True)
-    source_hash = Column(String(64), nullable=True)
     content_hash = Column(String(64), nullable=False, index=True)
     status = Column(String(16), nullable=False, default="draft", index=True)
     is_current = Column(Boolean, nullable=False, default=True, index=True)

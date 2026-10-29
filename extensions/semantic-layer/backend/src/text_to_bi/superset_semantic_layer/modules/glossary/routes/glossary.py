@@ -3,7 +3,7 @@ from typing import Any
 from flask import request
 from flask_appbuilder.api import expose, permission_name, protect, safe
 from flask_login import current_user
-from superset import db, security_manager
+from superset import db
 
 from ....common.utils.type_formatter import iso_datetime
 from ....core.database import handle_errors, rollback_on_error
@@ -24,15 +24,8 @@ from ..services.discovery import (
     glossary_links,
     glossary_metric_approved,
 )
-from ..services.glossary import (
-    GlossaryValidationError,
-    approve_revision,
-    create_draft,
-    glossary_link_fingerprint,
-    revision_author_id,
-    revoke_revision,
-    update_draft,
-)
+from ..services.glossary import approve_revision, create_draft, revision_author_id, revoke_revision, update_draft
+from ..services.validation import expected_revision_of, glossary_link_fingerprint, review_reason
 
 
 class GlossaryRoutes:
@@ -47,7 +40,6 @@ class GlossaryRoutes:
             "canonical_name": revision.term.canonical_name,
             "definition": revision.definition,
             "synonyms": revision.synonyms or [],
-            "provenance": revision.provenance,
             "status": revision.status,
             "is_current": revision.is_current,
             "created_at": iso_datetime(revision.created_on),
@@ -70,7 +62,6 @@ class GlossaryRoutes:
         return {
             "id": term.id,
             "canonical_name": term.canonical_name,
-            "owner_id": term.owner_id,
             "steward_id": term.steward_id,
             "current_revision": current,
             "revisions": serialized,
@@ -78,10 +69,6 @@ class GlossaryRoutes:
 
     def _glossary_term_by_id(self, term_id: int) -> GlossaryTerm | None:
         return glossary_term_repository().get(term_id)
-
-    @staticmethod
-    def _glossary_user_exists(user_id: int) -> bool:
-        return security_manager.get_user_by_id(user_id) is not None
 
     def _glossary_link_is_live(self, link: GlossaryTermLink) -> bool:
         """The linked object is unchanged since the term was saved, and a linked metric is still approved."""
@@ -106,7 +93,8 @@ class GlossaryRoutes:
         links = glossary_links(revision.id)
         entry = self._glossary_term(term, [revision])
         stale = not all(self._glossary_link_is_live(link) for link in links)
-        author_id = revision_author_id(db.session, revision)
+        author_id = revision_author_id(revision)
+        serving = glossary_term_revision_repository().serving_for(term.id)
         current = entry["current_revision"]
         for serialized, link in zip(current["links"], links):
             dataset = get_dataset(link.dataset_id)
@@ -120,6 +108,9 @@ class GlossaryRoutes:
         return {
             **entry,
             "state": "outdated" if revision.status == "approved" and stale else revision.status,
+            # The approved revision still answering the AI Agent while an edit of it waits for review.
+            "serving_revision_number": serving.revision_number if serving else None,
+            "steward_name": user_name(term.steward_id),
             "author_id": author_id,
             "author_name": user_name(author_id),
             "approver_name": user_name(revision.approver_id),
@@ -144,6 +135,7 @@ class GlossaryRoutes:
         return self.response(
             200,
             terms=terms,
+            users=self._active_users(),
             current_user_id=current_user.id,
             require_second_reviewer=second_reviewer_required(),
         )
@@ -204,14 +196,7 @@ class GlossaryRoutes:
     def create_glossary(self):
         require_admin()
         ensure_dictionary_tables()
-        revision = create_draft(
-            db.session,
-            request.get_json(silent=True),
-            current_user.id,
-            get_dataset,
-            self._glossary_user_exists,
-            glossary_metric_approved,
-        )
+        revision = create_draft(request.get_json(silent=True), current_user.id)
         db.session.commit()
         return self.response(201, term=self._glossary_term(revision.term, [revision]))
 
@@ -226,38 +211,7 @@ class GlossaryRoutes:
         require_admin()
         ensure_dictionary_tables()
         payload = request.get_json(silent=True)
-        current = glossary_term_revision_repository().current_for(term_id)
-        if current is None:
-            raise GlossaryTermNotFoundError()
-        expected_revision = payload.get("expected_revision") if isinstance(payload, dict) else None
-        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
-            raise GlossaryValidationError("expected_revision is required.")
-        content = dict(payload)
-        content.pop("expected_revision")
-        revision = update_draft(
-            db.session,
-            current,
-            content,
-            expected_revision,
-            current_user.id,
-            get_dataset,
-            self._glossary_user_exists,
-            glossary_metric_approved,
-        )
-        db.session.commit()
-        return self.response(200, term=self._glossary_term(revision.term, [revision]))
-
-    def _glossary_lifecycle(self, term_id: int, event: str, expected_revision: int, actor_id: int, reason: str | None):
-        ensure_dictionary_tables()
-        revision = glossary_term_revision_repository().current_for(term_id)
-        if revision is None:
-            raise GlossaryTermNotFoundError()
-        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int):
-            raise GlossaryValidationError("expected_revision is required.")
-        if event == "approve":
-            approve_revision(db.session, revision, expected_revision, actor_id, reason, second_reviewer_required())
-        else:
-            revoke_revision(db.session, revision, expected_revision, actor_id, reason)
+        revision = update_draft(term_id, payload, expected_revision_of(payload), current_user.id)
         db.session.commit()
         return self.response(200, term=self._glossary_term(revision.term, [revision]))
 
@@ -270,10 +224,13 @@ class GlossaryRoutes:
     @handle_errors
     def approve_glossary(self, term_id: int):
         require_admin()
+        ensure_dictionary_tables()
         payload = request.get_json(silent=True)
-        expected_revision = payload.get("expected_revision") if isinstance(payload, dict) else None
-        reason = payload.get("reason") if isinstance(payload, dict) else None
-        return self._glossary_lifecycle(term_id, "approve", expected_revision, current_user.id, reason)
+        revision = approve_revision(
+            term_id, expected_revision_of(payload), current_user.id, review_reason(payload), second_reviewer_required()
+        )
+        db.session.commit()
+        return self.response(200, term=self._glossary_term(revision.term, [revision]))
 
     @expose("/glossary/<int:term_id>/revoke", methods=("POST",))
     @protect()
@@ -284,10 +241,11 @@ class GlossaryRoutes:
     @handle_errors
     def revoke_glossary(self, term_id: int):
         require_admin()
+        ensure_dictionary_tables()
         payload = request.get_json(silent=True)
-        expected_revision = payload.get("expected_revision") if isinstance(payload, dict) else None
-        reason = payload.get("reason") if isinstance(payload, dict) else None
-        return self._glossary_lifecycle(term_id, "revoke", expected_revision, current_user.id, reason)
+        revision = revoke_revision(term_id, expected_revision_of(payload), current_user.id, review_reason(payload))
+        db.session.commit()
+        return self.response(200, term=self._glossary_term(revision.term, [revision]))
 
     @expose("/glossary/<int:term_id>/audit", methods=("GET",))
     @protect()
@@ -309,7 +267,7 @@ class GlossaryRoutes:
                     "actor_id": row.actor_id,
                     "actor_name": user_name(row.actor_id),
                     "reason": row.reason,
-                    "created_at": row.occurred_at.isoformat(),
+                    "created_at": iso_datetime(row.occurred_at),
                 }
                 for row in events
             ],

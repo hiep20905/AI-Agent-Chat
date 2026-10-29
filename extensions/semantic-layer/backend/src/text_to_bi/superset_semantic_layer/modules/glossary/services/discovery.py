@@ -8,7 +8,7 @@ from ...semantic_query.services.metric_review import metric_contract_for
 from ...superset.services.datasets import get_dataset
 from ..dependencies import glossary_term_link_repository, glossary_term_revision_repository
 from ..models import GlossaryTermLink
-from .glossary import glossary_link_fingerprint
+from .validation import glossary_link_fingerprint
 
 
 def glossary_links(revision_id: int) -> list[GlossaryTermLink]:
@@ -29,8 +29,8 @@ def glossary_metric_approved(dataset: SqlaTable, metric: Any) -> bool:
 
 
 def discoverable_glossary_terms() -> list[dict[str, Any]]:
-    """Approved current terms with only their fresh links to datasets the caller may access."""
-    rows = glossary_term_revision_repository().approved_current()
+    """Each term's serving revision with only its fresh links to datasets the caller may access."""
+    rows = glossary_term_revision_repository().serving()
     terms = []
     for revision in rows:
         visible_links = []
