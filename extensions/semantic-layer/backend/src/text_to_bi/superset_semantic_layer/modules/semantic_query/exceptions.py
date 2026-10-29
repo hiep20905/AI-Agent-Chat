@@ -7,10 +7,6 @@ from ...common.exceptions import (
 )
 
 
-class SemanticQueryError(ValidationError):
-    """Raised when a semantic query is outside the supported safe contract."""
-
-
 class MetricContractValidationError(ValidationError):
     """A metric contract, its review or its business definition breaks a rule."""
 

@@ -10,10 +10,6 @@ from sqlglot.errors import SqlglotError
 from ....common.utils.type_formatter import canonical_json
 from ..exceptions import ApprovedMetricContractRequiredError, MetricContractValidationError
 
-_SIMPLE_AGGREGATE = re.compile(
-    r'^\s*(?P<aggregation>avg|count|max|min|sum)\s*\(\s*"?(?P<column>[A-Za-z_][A-Za-z0-9_]*)"?\s*\)\s*$',
-    re.IGNORECASE,
-)
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _AGGREGATES = (exp.Avg, exp.Count, exp.Max, exp.Min, exp.Sum)
 # Every node a contract metric may contain. Anything else, such as a subquery, another function, DISTINCT, FILTER or
@@ -310,44 +306,3 @@ def _scalar_filter_value(value: Any) -> bool:
         return len(value) <= MAX_FILTER_STRING_LENGTH
     return isinstance(value, (int, float, bool))
 
-
-def build_preview_contract(dataset: Any, dictionary_columns: list[Any]) -> dict[str, Any]:
-    """Return safe ephemeral contracts from a dataset's curated Superset metadata.
-
-    There is not yet a persisted metric-contract approval model. The caller must
-    therefore treat this as preview-only and never execute its compiled SQL.
-    """
-    dataset_name = str(dataset.table_name)
-    schema = getattr(dataset, "schema", None)
-    table_name = f"{schema}.{dataset_name}" if schema else dataset_name
-    engine = str(dataset.database.db_engine_spec.engine).lower()
-    live_columns = {str(column.column_name) for column in dataset.columns}
-    dictionary_column_names = {str(column.column_name) for column in dictionary_columns}
-    metrics = []
-    for metric in dataset.metrics:
-        match = _SIMPLE_AGGREGATE.fullmatch(str(metric.expression or ""))
-        metric_name = getattr(metric, "metric_name", None)
-        if match is None or not isinstance(metric_name, str) or _IDENTIFIER.fullmatch(metric_name) is None:
-            continue
-        column = match.group("column")
-        if column not in live_columns:
-            continue
-        metrics.append(
-            {
-                "name": metric_name,
-                "dataset": dataset_name,
-                "eligible_for_preview": True,
-                "aggregation": match.group("aggregation").lower(),
-                "column": column,
-            }
-        )
-    dimensions = [
-        {"name": column, "dataset": dataset_name, "eligible_for_preview": True, "column": column}
-        for column in sorted(live_columns & dictionary_column_names)
-    ]
-    return {
-        "dataset": {"name": dataset_name, "table": table_name, "dialect": engine},
-        "metrics": metrics,
-        "dimensions": dimensions,
-        "contract_source": "curated_superset_metric_and_dictionary",
-    }

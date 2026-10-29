@@ -78,7 +78,6 @@ function FilterSelect({ label, items, value, onChange }: {
 
 type MetricContractsProps = { databaseId: number | null };
 
-/** Admin workspace listing every saved metric with its review state: propose, approve, revoke and try each metric. */
 /**
  * A metric AI Agent proposed for a question. Metrics are saved metrics of a Superset dataset, so the administrator adds
  * it in the dataset editor and comes back here to give it a business definition and propose it for approval.
@@ -108,6 +107,7 @@ function ProposedMetric({ request, onClose }: { request: MetricRequest; onClose:
   );
 }
 
+/** Admin workspace listing every saved metric with its review state: propose, approve, revoke and try each metric. */
 export function MetricContracts({ databaseId }: MetricContractsProps) {
   // Set when "Xử lý câu hỏi" sent the administrator here to add the metric a question was missing.
   const [creation, setCreation] = useState<MetricRequest | null>(() => takeMetricRequest());

@@ -10,10 +10,6 @@ import pytest
 from catalog_source import SOURCE_PATHS, api_class, compile_into, module_function
 
 from text_to_bi.superset_semantic_layer.modules.semantic_query.exceptions import RelationshipValidationError
-from text_to_bi.superset_semantic_layer.modules.semantic_query.services.compiler import (
-    SemanticQueryError,
-    compile_semantic_query,
-)
 from text_to_bi.superset_semantic_layer.modules.semantic_query.services.contracts import (
     METRIC_CONTRACT_RULE,
     build_metric_chart_payload,
@@ -321,14 +317,7 @@ def test_execute_returns_the_superset_sql_to_administrators_only(monkeypatch):
     assert api.execute_metric_contract(dataset.id, metric.id)[1]["sql"] is None
 
 
-def test_preview_compiler_and_execute_payload_reject_joins():
-    with pytest.raises(SemanticQueryError, match="joins are unsupported"):
-        compile_semantic_query(
-            {"name": "weather", "table": "weather", "dialect": "postgresql"},
-            [{"name": "m", "dataset": "weather", "column": "temperature", "aggregation": "avg", "approved": True}],
-            [],
-            {"metric": "m", "joins": [{"dataset": "other"}]},
-        )
+def test_execute_payload_rejects_joins():
     with pytest.raises(ValueError, match="joins are not supported"):
         build_metric_chart_payload(_dataset(), SimpleNamespace(metric_name="m"), {"joins": []}, 1000)
 

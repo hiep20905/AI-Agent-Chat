@@ -11,7 +11,7 @@ from superset.connectors.sqla.models import SqlaTable
 from ....common.exceptions import SemanticLayerError
 from ....common.utils.type_formatter import iso_datetime
 from ....core.database import handle_errors, rollback_on_error
-from ....core.exceptions import DatabaseIdRequiredError, RequestBodyError
+from ....core.exceptions import DatabaseIdRequiredError
 from ....core.security import (
     csrf_protected,
     is_admin,
@@ -22,7 +22,6 @@ from ....core.security import (
 )
 from ....migrations import ensure_dictionary_tables
 from ...agent_ladder.services.agent_ladder import AGENT_ORIGIN
-from ...data_dictionary.dependencies import column_dictionary_repository
 from ...superset.services.datasets import datasets_on_database, get_dataset, require_dataset
 from ...superset.services.users import active_users, user_names
 from ..dependencies import (
@@ -40,9 +39,7 @@ from ..exceptions import (
     MetricSelfApprovalError,
 )
 from ..models import MetricContract, MetricDefinition
-from ..services.compiler import compile_semantic_query
 from ..services.contracts import (
-    build_preview_contract,
     contract_is_approved_current,
     execute_approved_chart_query,
     metric_contract_hash,
@@ -400,13 +397,12 @@ class MetricContractRoutes:
             )
         except SemanticLayerError:
             raise
-        except ValueError as ex:
+        except ValueError as error:
+            raise MetricContractValidationError(str(error)) from error
+        except Exception as error:
             db.session.rollback()
-            return self.response_400(message=str(ex))
-        except Exception as ex:
-            db.session.rollback()
-            if is_superset_access_error(ex):
-                raise MetricExecutionDeniedError() from ex
+            if is_superset_access_error(error):
+                raise MetricExecutionDeniedError() from error
             logger.exception("Superset ChartData metric execution failed")
             return self.response_500(message="Metric execution was rejected by Superset.")
         if result.get("error"):
@@ -422,29 +418,3 @@ class MetricContractRoutes:
             sql=result.get("query") if is_admin() else None,
             preview=contract is not None and contract.status == "candidate",
         )
-
-    @expose("/dataset/<int:dataset_id>/semantic-query/preview", methods=("POST",))
-    @protect()
-    @permission_name("read")
-    @csrf_protected
-    @handle_errors
-    def preview_semantic_query(self, dataset_id: int):
-        """Compile, but never execute, a one-dataset semantic query preview."""
-        require_admin()
-        dataset = require_dataset(dataset_id)
-        require_dataset_access(dataset)
-        query_request = request.get_json(silent=True)
-        if not isinstance(query_request, dict):
-            raise RequestBodyError()
-
-        dictionary_columns = column_dictionary_repository().in_dataset(dataset_id).all()
-        contract = build_preview_contract(dataset, dictionary_columns)
-        preview = compile_semantic_query(
-            contract["dataset"],
-            [{**metric, "approved": metric["eligible_for_preview"]} for metric in contract["metrics"]],
-            [{**dimension, "approved": dimension["eligible_for_preview"]} for dimension in contract["dimensions"]],
-            query_request,
-        )
-        preview["provenance"]["contract_source"] = contract["contract_source"]
-        preview["provenance"]["execution"] = "not_executed"
-        return self.response(200, preview=preview)
