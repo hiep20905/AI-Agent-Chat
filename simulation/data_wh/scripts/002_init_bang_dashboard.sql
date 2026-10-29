@@ -81,6 +81,9 @@ CREATE TABLE IF NOT EXISTS fact_chi_tiet_thoi_tiet (
 CREATE TABLE IF NOT EXISTS fact_tong_hop_thoi_tiet (
     quan_sat_id BIGINT PRIMARY KEY,
     thanh_pho_key BIGINT NOT NULL REFERENCES dim_thanh_pho(thanh_pho_key),
+    -- Chep tu dm_thanh_pho de nhom va loc theo ten, vung ma khong can cot tinh toan trong Superset.
+    ten_thanh_pho VARCHAR(100) NOT NULL,
+    vung VARCHAR(100) NOT NULL,
     ngay_key DATE NOT NULL REFERENCES dim_ngay(ngay_key),
     dieu_kien_key BIGINT REFERENCES dim_dieu_kien_thoi_tiet(dieu_kien_key),
     nguon_du_lieu_key BIGINT NOT NULL REFERENCES dim_nguon_du_lieu(nguon_du_lieu_key),
@@ -179,7 +182,7 @@ BEGIN
     JOIN tb_gia_tri_quan_sat g ON g.quan_sat_id = q.quan_sat_id;
 
     INSERT INTO fact_tong_hop_thoi_tiet (
-        quan_sat_id, thanh_pho_key, ngay_key, dieu_kien_key, nguon_du_lieu_key,
+        quan_sat_id, thanh_pho_key, ten_thanh_pho, vung, ngay_key, dieu_kien_key, nguon_du_lieu_key,
         loai_quan_sat, thoi_diem_quan_sat,
         nhiet_do_c, cam_nhan_c, do_am_pct, luong_mua_mm, mua_mm,
         xac_suat_mua_pct, ap_suat_hpa, may_phu_pct, toc_do_gio_kmh,
@@ -190,7 +193,7 @@ BEGIN
         thoi_luong_ban_ngay_gio, la_ban_ngay, lay_luc
     )
     SELECT
-        q.quan_sat_id, q.thanh_pho_id, q.ngay_id, q.dieu_kien_id,
+        q.quan_sat_id, q.thanh_pho_id, t.ten_thanh_pho, t.vung, q.ngay_id, q.dieu_kien_id,
         q.nguon_du_lieu_id, q.loai_quan_sat, q.thoi_diem_quan_sat,
         MAX(g.gia_tri_so) FILTER (WHERE c.ma_chi_so = 'nhiet_do_c'),
         MAX(g.gia_tri_so) FILTER (WHERE c.ma_chi_so = 'cam_nhan_c'),
@@ -221,7 +224,8 @@ BEGIN
     FROM tb_quan_sat_thoi_tiet q
     JOIN tb_gia_tri_quan_sat g ON g.quan_sat_id = q.quan_sat_id
     JOIN dm_chi_so_thoi_tiet c ON c.chi_so_id = g.chi_so_id
-    GROUP BY q.quan_sat_id, q.thanh_pho_id, q.ngay_id, q.dieu_kien_id,
+    JOIN dm_thanh_pho t ON t.thanh_pho_id = q.thanh_pho_id
+    GROUP BY q.quan_sat_id, q.thanh_pho_id, t.ten_thanh_pho, t.vung, q.ngay_id, q.dieu_kien_id,
              q.nguon_du_lieu_id, q.loai_quan_sat, q.thoi_diem_quan_sat, q.lay_luc;
 END;
 $$;

@@ -18,31 +18,20 @@ HOURLY = "loai_quan_sat = 'DU_BAO_GIO'"
 DAILY = "loai_quan_sat = 'DU_BAO_NGAY'"
 
 
-def _city_lookup(table_name: str, column_name: str) -> str:
-    # Superset queries a physical dataset without an alias, so the subquery can correlate on the table name.
-    return (
-        f"(SELECT d.{column_name} FROM public.dim_thanh_pho d"
-        f" WHERE d.thanh_pho_key = {table_name}.thanh_pho_key)"
-    )
-
-
 METRICS: dict[str, dict[str, object]] = {
     "fact_tong_hop_thoi_tiet": {
         "main_dttm_col": "thoi_diem_quan_sat",
-        "calculated_columns": [
+        # Labels for physical columns; the table copies the city name and region from dm_thanh_pho.
+        "column_labels": [
             {
                 "column_name": "ten_thanh_pho",
                 "verbose_name": "Tên thành phố",
-                "expression": _city_lookup("fact_tong_hop_thoi_tiet", "ten_thanh_pho"),
-                "type": "VARCHAR",
-                "description": "Tên thành phố, tra từ dim_thanh_pho theo thanh_pho_key.",
+                "description": "Tên thành phố, chép từ dm_thanh_pho khi làm mới bảng.",
             },
             {
                 "column_name": "vung",
                 "verbose_name": "Vùng",
-                "expression": _city_lookup("fact_tong_hop_thoi_tiet", "vung"),
-                "type": "VARCHAR",
-                "description": "Vùng địa lý của thành phố, tra từ dim_thanh_pho theo thanh_pho_key.",
+                "description": "Vùng địa lý của thành phố, chép từ dm_thanh_pho khi làm mới bảng.",
             },
         ],
         "metrics": [
@@ -120,7 +109,7 @@ def bootstrap() -> None:
     app = create_app()
     with app.app_context():
         from superset import db
-        from superset.connectors.sqla.models import SqlaTable, SqlMetric, TableColumn
+        from superset.connectors.sqla.models import SqlaTable, SqlMetric
         from superset.models.core import Database
 
         database_name = os.getenv("WAREHOUSE_SUPERSET_NAME", "Weather Warehouse")
@@ -149,15 +138,13 @@ def bootstrap() -> None:
             dataset.main_dttm_col = spec["main_dttm_col"]
 
             columns = {column.column_name: column for column in dataset.columns}
-            for values in spec.get("calculated_columns", []):
+            for values in spec.get("column_labels", []):
                 column = columns.get(values["column_name"])
                 if column is None:
-                    column = TableColumn(table=dataset, column_name=values["column_name"])
-                    dataset.columns.append(column)
+                    LOGGER.warning("Column %s.%s not found; sync the dataset first.", table_name, values["column_name"])
+                    continue
                 for field, value in values.items():
                     setattr(column, field, value)
-                column.groupby = True
-                column.filterable = True
 
             existing = {metric.metric_name: metric for metric in dataset.metrics}
             created = updated = 0
