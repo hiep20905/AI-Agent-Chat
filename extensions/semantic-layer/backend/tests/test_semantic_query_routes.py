@@ -20,6 +20,11 @@ from text_to_bi.superset_semantic_layer.modules.semantic_query.services.contract
     metric_is_eligible_for_contract,
     parse_contract_metric,
 )
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.formula_reading import (
+    FormulaVocabulary,
+    RowKindGrain,
+    read_formula,
+)
 from text_to_bi.superset_semantic_layer.modules.semantic_query.services.relationship_discovery import (
     SOURCES,
     stored_verification,
@@ -127,7 +132,7 @@ def _route_api(datasets):
         "_serialize_relationship_contract", "create_metric_contract_candidate", "approve_metric_contract",
         "revoke_metric_contract", "execute_metric_contract", "create_relationship_contract_candidate",
         "approve_relationship_contract", "revoke_relationship_contract", "semantic_catalog", "_query_dataset",
-        "list_metric_contracts", "_active_users", "_serialize_metric_definition",
+        "list_metric_contracts", "_active_users", "_serialize_metric_definition", "_formula_vocabularies",
         "save_metric_definition", "list_metric_contract_events",
         "create_agent_metric", "_agent_metric", "_relationship_contract_fields", "_snapshot_relationship_candidate",
     }
@@ -172,6 +177,9 @@ def _route_api(datasets):
         "metric_contract_ineligibility": metric_contract_ineligibility,
         "metric_contract_state": metric_contract_state,
         "parse_contract_metric": parse_contract_metric,
+        "read_formula": read_formula,
+        "FormulaVocabulary": FormulaVocabulary,
+        "RowKindGrain": RowKindGrain,
         "contract_is_approved_current": contract_is_approved_current,
         "execute_approved_chart_query": None,
         "relationship_cardinality": relationship_cardinality,
@@ -482,6 +490,9 @@ def _metric_list_api(dataset, contracts):
             return {_CatalogDataset: [dataset], _MetricContract: contracts}.get(self.model, [])
 
     namespace["db"].session.query = Query
+    namespace["column_dictionary_repository"] = lambda: SimpleNamespace(list_for_datasets=lambda dataset_ids: [])
+    namespace["dataset_dictionary_repository"] = lambda: SimpleNamespace(list_by_ids=lambda dataset_ids: [])
+    namespace["dataset_grain_repository"] = lambda: SimpleNamespace(list_for_datasets=lambda dataset_ids: [])
     namespace["request"] = SimpleNamespace(args=SimpleNamespace(get=lambda key, type=None: 1))
     namespace["security_manager"] = SimpleNamespace(
         get_user_by_id=lambda user_id: SimpleNamespace(get_full_name=lambda: "Ada Admin", username="admin")
@@ -493,7 +504,9 @@ def _metric_list_api(dataset, contracts):
 def test_metric_list_reports_state_formula_and_reason_and_skips_the_default_count():
     dataset = _dataset()
     dataset.columns[0].__dict__.update(verbose_name="Temperature", type="FLOAT", is_dttm=False)
-    note_column = SimpleNamespace(column_name="note", is_active=True, groupby=False, filterable=False, expression=None)
+    note_column = SimpleNamespace(
+        column_name="note", verbose_name=None, is_active=True, groupby=False, filterable=False, expression=None
+    )
     dataset.columns.append(note_column)
     metric_fields = {"verbose_name": None, "description": None, "d3format": ",.1f"}
     dataset.metrics[0].__dict__.update(metric_fields)
@@ -513,6 +526,10 @@ def test_metric_list_reports_state_formula_and_reason_and_skips_the_default_coun
     assert (approved["metric_name"], spread["metric_name"]) == ("average_temperature", "spread")
     assert approved["state"] == "approved" and approved["ineligibility"] is None
     assert approved["formula"]["aggregation"] == "AVG" and approved["formula"]["measure_column"] == "temperature"
+    assert approved["reading"] == {
+        "scale": None, "numerator": "trung bình của Temperature", "denominator": None, "only_rows": [],
+    }
+    assert spread["reading"] is None
     assert approved["contract"]["approver_name"] == "Ada Admin" and "expression_hash" not in approved["contract"]
     assert spread["state"] == "ineligible" and spread["contract"] is None
     assert spread["ineligibility"] == METRIC_CONTRACT_RULE

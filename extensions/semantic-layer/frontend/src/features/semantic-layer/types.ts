@@ -113,6 +113,14 @@ export type MetricFormula = MetricFormulaTerm & {
   columns: string[];
 };
 
+/** A formula in business words; `only_rows` are the row filters every part of it shares. */
+export type MetricFormulaReading = {
+  scale: string | null;
+  numerator: string;
+  denominator: string | null;
+  only_rows: string[];
+};
+
 export type MetricReviewItem = {
   dataset_id: number;
   metric_id: number;
@@ -122,6 +130,7 @@ export type MetricReviewItem = {
   expression: string | null;
   d3format: string | null;
   formula: MetricFormula | null;
+  reading: MetricFormulaReading | null;
   ineligibility: string | null;
   state: MetricReviewState;
   contract: (MetricContract & { owner_name: string | null; approver_name: string | null; revoker_name: string | null }) | null;

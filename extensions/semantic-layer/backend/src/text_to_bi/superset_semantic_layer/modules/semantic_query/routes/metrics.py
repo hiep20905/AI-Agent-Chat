@@ -22,6 +22,11 @@ from ....core.security import (
 )
 from ....migrations import ensure_dictionary_tables
 from ...agent_ladder.services.agent_ladder import AGENT_ORIGIN
+from ...data_dictionary.dependencies import (
+    column_dictionary_repository,
+    dataset_dictionary_repository,
+    dataset_grain_repository,
+)
 from ...superset.services.datasets import datasets_on_database, get_dataset, require_dataset
 from ...superset.services.users import active_users, user_names
 from ..dependencies import (
@@ -47,6 +52,7 @@ from ..services.contracts import (
     metric_contract_state,
     parse_contract_metric,
 )
+from ..services.formula_reading import FormulaVocabulary, RowKindGrain, read_formula
 from ..services.limits import (
     METRIC_DEFINITION_MAX_LENGTH,
     METRIC_UNIT_MAX_LENGTH,
@@ -119,6 +125,31 @@ class MetricContractRoutes:
         name = f"{dataset.schema}.{dataset.table_name}" if dataset.schema else dataset.table_name
         return {"id": dataset.id, "name": name, "columns": query_columns}
 
+    @staticmethod
+    def _formula_vocabularies(datasets: list[SqlaTable]) -> dict[int, FormulaVocabulary]:
+        """Each dataset's column labels and row grains from the data dictionary, so formulas read in business words."""
+        dataset_ids = [dataset.id for dataset in datasets]
+        labels: dict[int, dict[str, str]] = {
+            dataset.id: {column.column_name: column.verbose_name for column in dataset.columns if column.verbose_name}
+            for dataset in datasets
+        }
+        for column in column_dictionary_repository().list_for_datasets(dataset_ids) if dataset_ids else []:
+            if column.display_name:
+                labels[column.dataset_id][column.column_name] = column.display_name
+        row_kind_columns = {
+            dictionary.id: dictionary.row_kind_column
+            for dictionary in (dataset_dictionary_repository().list_by_ids(dataset_ids) if dataset_ids else [])
+        }
+        grains: dict[int, list[RowKindGrain]] = {dataset_id: [] for dataset_id in dataset_ids}
+        for grain in dataset_grain_repository().list_for_datasets(dataset_ids) if dataset_ids else []:
+            grains[grain.dataset_id].append(RowKindGrain(grain.row_kind_value, grain.grain, grain.label))
+        return {
+            dataset_id: FormulaVocabulary(
+                labels[dataset_id], row_kind_columns.get(dataset_id), tuple(grains[dataset_id])
+            )
+            for dataset_id in dataset_ids
+        }
+
     @expose("/metric-contracts", methods=("GET",))
     @protect()
     @safe
@@ -142,6 +173,7 @@ class MetricContractRoutes:
             for definition in metric_definition_repository().for_datasets(dataset_ids)
         } if dataset_ids else {}
         user_name = user_names()
+        vocabularies = self._formula_vocabularies(datasets)
         metrics = []
         for dataset in datasets:
             for metric in dataset.metrics:
@@ -160,6 +192,7 @@ class MetricContractRoutes:
                         "expression": metric.expression,
                         "d3format": metric.d3format,
                         "formula": formula.as_dict() if formula else None,
+                        "reading": read_formula(formula, vocabularies[dataset.id]) if formula else None,
                         "ineligibility": metric_contract_ineligibility(dataset, metric),
                         "state": metric_contract_state(contract, dataset, metric),
                         "contract": {

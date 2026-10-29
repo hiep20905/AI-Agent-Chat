@@ -14,6 +14,9 @@ class DatasetGrainRepository(BaseRepository[DatasetGrain]):
     def list_for_dataset(self, dataset_id: int) -> list[DatasetGrain]:
         return self.query().filter(DatasetGrain.dataset_id == dataset_id).all()
 
+    def list_for_datasets(self, dataset_ids: Iterable[int]) -> list[DatasetGrain]:
+        return self.query().filter(DatasetGrain.dataset_id.in_(list(dataset_ids))).all()
+
     def by_row_kind(self, dataset_id: int) -> Query:
         return self.query().filter(DatasetGrain.dataset_id == dataset_id).order_by(DatasetGrain.row_kind_value)
 

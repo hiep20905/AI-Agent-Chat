@@ -6,8 +6,8 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Textarea } from '@/components/ui/textarea';
 import { requestJson, semanticLayerApi } from './api';
 import type {
-  MetricContractEvent, MetricContractEventAction, MetricDefinitionPayload, MetricFormula, MetricFormulaTerm,
-  MetricReviewItem, MetricUser,
+  MetricContractEvent, MetricContractEventAction, MetricDefinitionPayload, MetricFormulaReading, MetricReviewItem,
+  MetricUser,
 } from './types';
 
 const EVENT_LABELS: Record<MetricContractEventAction, string> = {
@@ -20,26 +20,19 @@ const EVENT_LABELS: Record<MetricContractEventAction, string> = {
 const NO_STEWARD = 'none';
 export const formatTime = (value: string | null) => (value ? new Date(value).toLocaleString('vi-VN') : '');
 
-function FormulaTerm({ term }: { term: MetricFormulaTerm }) {
-  const measure = term.measure_column ?? term.measure_constant ?? '—';
+/** The formula in business words: the dictionary's column labels, a ratio as (…) ÷ (…), and the row filter apart. */
+function FormulaReading({ name, reading }: { name: string; reading: MetricFormulaReading }) {
+  const scale = reading.scale && reading.scale !== '1' ? `${reading.scale} × ` : '';
   return (
-    <>
-      <code>{term.aggregation}</code> của <code>{measure}</code>
-      {term.condition ? <>, chỉ tính các dòng có <code>{term.condition}</code></> : null}
-    </>
-  );
-}
-
-/** Reads the parsed formula as one sentence, so a reviewer need not decode the CASE WHEN or the ratio. */
-function FormulaSummary({ formula }: { formula: MetricFormula }) {
-  if (!formula.denominator) {
-    return <p className="sl-metrics-formula-summary"><FormulaTerm term={formula} /></p>;
-  }
-  const ratio = Number(formula.scale) === 100 ? 'Tỷ lệ phần trăm' : `Tỷ lệ (nhân ${formula.scale})`;
-  return (
-    <p className="sl-metrics-formula-summary">
-      {ratio} giữa (<FormulaTerm term={formula} />) và (<FormulaTerm term={formula.denominator} />)
-    </p>
+    <div className="sl-metrics-reading">
+      <p>
+        <strong>{name}</strong> ={' '}
+        {reading.denominator ? `${scale}(${reading.numerator}) ÷ (${reading.denominator})` : reading.numerator}
+      </p>
+      {reading.only_rows.length ? (
+        <p className="sl-metrics-reading-rows">Chỉ tính các dòng có {reading.only_rows.join(' và ')}</p>
+      ) : null}
+    </div>
   );
 }
 
@@ -256,7 +249,9 @@ export function MetricDefinitionPanel(
       </section>
       <section className="sl-metrics-section">
         <h4>Công thức</h4>
-        {metric.formula ? <FormulaSummary formula={metric.formula} /> : null}
+        {metric.reading ? (
+          <FormulaReading name={metric.verbose_name || metric.metric_name} reading={metric.reading} />
+        ) : null}
         <pre className="sl-metrics-expression">{metric.expression || '—'}</pre>
       </section>
       <ReviewHistory metric={metric} revision={historyRevision} />
