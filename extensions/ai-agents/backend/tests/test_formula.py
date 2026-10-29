@@ -37,7 +37,24 @@ def test_contract_formulas_read_in_plain_vietnamese(expression, sentence):
     assert _sentence(told_formula(expression, COLUMNS)) == sentence
 
 
-@pytest.mark.parametrize("expression", ["MAX(nhiet_do) / 2", "SUM(cot_khac)", "MAX(t.nhiet_do)", "not sql ((("])
+def test_a_ratio_reads_as_the_share_of_one_aggregate_in_another():
+    expression = (
+        "100.0 * COUNT(CASE WHEN loai_quan_sat = 'DU_BAO_NGAY' AND nhiet_do > 0 THEN 1 END)"
+        " / NULLIF(COUNT(CASE WHEN loai_quan_sat = 'DU_BAO_NGAY' THEN 1 END), 0)"
+    )
+    assert _sentence(told_formula(expression, COLUMNS)) == (
+        "Tỷ lệ phần trăm giữa (đếm số dòng có Loại quan sát là “DU_BAO_NGAY” và nhiet_do lớn hơn 0)"
+        " và (đếm số dòng có Loại quan sát là “DU_BAO_NGAY”)"
+    )
+    assert _sentence(told_formula("SUM(nhiet_do) * 1.0 / NULLIF(COUNT(lan_nap_id), 0)", COLUMNS)) == (
+        "Tỷ lệ (nhân 1.0) giữa (tổng nhiet_do) và (đếm số Mã lần nạp)"
+    )
+
+
+@pytest.mark.parametrize(
+    "expression",
+    ["MAX(nhiet_do) / 2", "SUM(cot_khac)", "MAX(t.nhiet_do)", "not sql (((", "100.0 * SUM(nhiet_do) / SUM(nhiet_do)"],
+)
 def test_a_formula_the_sentence_cannot_tell_faithfully_gives_none(expression):
     assert told_formula(expression, COLUMNS) is None
 

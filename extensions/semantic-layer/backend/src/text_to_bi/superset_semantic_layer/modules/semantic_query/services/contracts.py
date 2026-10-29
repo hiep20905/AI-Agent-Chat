@@ -37,9 +37,12 @@ _CONTRACT_METRIC_NODES = (
     exp.Boolean,
     exp.Neg,
 )
+# A ratio divides two contract aggregates; only these nodes may join them.
+_RATIO_NODES = (exp.Div, exp.Mul, exp.Nullif)
 METRIC_CONTRACT_RULE = (
     "Công thức phải là đúng một AVG, COUNT, MAX, MIN hoặc SUM trên cột của dataset, có thể ở dạng "
-    "CASE WHEN <so sánh cột với hằng số> THEN <cột hoặc số> END."
+    "CASE WHEN <so sánh cột với hằng số> THEN <cột hoặc số> END; hoặc tỷ lệ giữa hai hàm như vậy, viết "
+    "<hệ số thập phân> * AGG(...) / NULLIF(AGG(...), 0), ví dụ 100.0 * ... cho phần trăm."
 )
 MAX_DIMENSIONS = 50
 MAX_FILTERS = 50
@@ -48,14 +51,13 @@ MAX_FILTER_STRING_LENGTH = 1024
 
 
 @dataclass(frozen=True)
-class ContractMetricFormula:
-    """The parts of a metric formula that contracts accept, for review and for binding to live columns."""
+class ContractMetricTerm:
+    """One aggregate of a contract formula: what it aggregates and which rows it counts."""
 
     aggregation: str
     measure_column: str | None
     measure_constant: str | None
     condition: str | None
-    columns: frozenset[str]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -63,30 +65,48 @@ class ContractMetricFormula:
             "measure_column": self.measure_column,
             "measure_constant": self.measure_constant,
             "condition": self.condition,
+        }
+
+
+@dataclass(frozen=True)
+class ContractMetricFormula:
+    """The parts of a metric formula that contracts accept, for review and for binding to live columns.
+
+    A plain metric is its numerator alone; a ratio also has a denominator and the decimal scale that multiplies it.
+    """
+
+    numerator: ContractMetricTerm
+    denominator: ContractMetricTerm | None
+    scale: str | None
+    columns: frozenset[str]
+
+    @property
+    def measure_column(self) -> str | None:
+        return self.numerator.measure_column
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            **self.numerator.as_dict(),
+            "denominator": self.denominator.as_dict() if self.denominator else None,
+            "scale": self.scale,
             "columns": sorted(self.columns),
         }
 
 
-def parse_contract_metric(expression: str) -> ContractMetricFormula | None:
-    """Parse ``AGG(column)`` or ``AGG(CASE WHEN condition THEN column-or-number END)``; None for any other formula.
+def _unwrapped(node: Any) -> Any:
+    while isinstance(node, exp.Paren):
+        node = node.this
+    return node
 
-    The condition may only compare unqualified columns with constants.
-    """
-    try:
-        tree = sqlglot.parse_one(expression)
-    except SqlglotError:
+
+def _contract_term(node: Any) -> ContractMetricTerm | None:
+    """``AGG(column)`` or ``AGG(CASE WHEN condition THEN column-or-number END)``; None for anything else."""
+    if not isinstance(node, _AGGREGATES):
         return None
-    if not isinstance(tree, _AGGREGATES):
+    inner = [child for child in node.walk() if child is not node]
+    if any(not isinstance(child, _CONTRACT_METRIC_NODES) or isinstance(child, _AGGREGATES) for child in inner):
         return None
-    nodes = list(tree.walk())
-    if any(not isinstance(node, _CONTRACT_METRIC_NODES) for node in nodes):
-        return None
-    if any(isinstance(node, _AGGREGATES) for node in nodes if node is not tree):
-        return None
-    columns = list(tree.find_all(exp.Column))
-    if not columns or any(column.table for column in columns):
-        return None
-    measure = tree.this
+    measure = node.this
     condition = None
     if isinstance(measure, exp.Case):
         branches = measure.args.get("ifs") or []
@@ -99,13 +119,65 @@ def parse_contract_metric(expression: str) -> ContractMetricFormula | None:
             return None
     elif not isinstance(measure, exp.Column):
         return None
-    return ContractMetricFormula(
-        aggregation=tree.key.upper(),
+    return ContractMetricTerm(
+        aggregation=node.key.upper(),
         measure_column=measure.name if isinstance(measure, exp.Column) else None,
         measure_constant=None if isinstance(measure, exp.Column) else measure.sql(dialect="postgres"),
         condition=condition,
-        columns=frozenset(column.name for column in columns),
     )
+
+
+def _decimal_scale(node: Any) -> str | None:
+    """A positive number written with a decimal point, such as 100.0, so the division is not an integer one."""
+    if isinstance(node, exp.Literal) and node.is_number and "." in node.this:
+        try:
+            return node.this if float(node.this) > 0 else None
+        except ValueError:
+            return None
+    return None
+
+
+def _ratio(tree: Any) -> tuple[ContractMetricTerm, ContractMetricTerm, str] | None:
+    """``scale * AGG(...) / NULLIF(AGG(...), 0)``, the scale on either side of the numerator."""
+    if not isinstance(tree, exp.Div):
+        return None
+    scaled, guarded = _unwrapped(tree.this), _unwrapped(tree.expression)
+    if not isinstance(scaled, exp.Mul) or not isinstance(guarded, exp.Nullif):
+        return None
+    left, right = _unwrapped(scaled.this), _unwrapped(scaled.expression)
+    scale, aggregate = _decimal_scale(left), right
+    if scale is None:
+        scale, aggregate = _decimal_scale(right), left
+    zero = _unwrapped(guarded.expression)
+    if scale is None or not (isinstance(zero, exp.Literal) and zero.is_number and float(zero.this) == 0):
+        return None
+    numerator, denominator = _contract_term(aggregate), _contract_term(_unwrapped(guarded.this))
+    return (numerator, denominator, scale) if numerator and denominator else None
+
+
+def parse_contract_metric(expression: str) -> ContractMetricFormula | None:
+    """Parse one contract aggregate, or a ratio of two; None for any other formula.
+
+    A condition may only compare unqualified columns with constants. A ratio needs a decimal scale, because
+    COUNT / COUNT is an integer division in PostgreSQL, and NULLIF around its denominator, so no row divides by zero.
+    """
+    try:
+        tree = _unwrapped(sqlglot.parse_one(expression))
+    except SqlglotError:
+        return None
+    nodes = list(tree.walk())
+    if any(not isinstance(node, (*_CONTRACT_METRIC_NODES, *_RATIO_NODES)) for node in nodes):
+        return None
+    columns = list(tree.find_all(exp.Column))
+    if not columns or any(column.table for column in columns):
+        return None
+    column_names = frozenset(column.name for column in columns)
+    if term := _contract_term(tree):
+        return ContractMetricFormula(numerator=term, denominator=None, scale=None, columns=column_names)
+    if ratio := _ratio(tree):
+        numerator, denominator, scale = ratio
+        return ContractMetricFormula(numerator=numerator, denominator=denominator, scale=scale, columns=column_names)
+    return None
 
 
 def _live_columns(dataset: Any) -> dict[Any, Any]:

@@ -6,7 +6,8 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Textarea } from '@/components/ui/textarea';
 import { requestJson, semanticLayerApi } from './api';
 import type {
-  MetricContractEvent, MetricContractEventAction, MetricDefinitionPayload, MetricFormula, MetricReviewItem, MetricUser,
+  MetricContractEvent, MetricContractEventAction, MetricDefinitionPayload, MetricFormula, MetricFormulaTerm,
+  MetricReviewItem, MetricUser,
 } from './types';
 
 const EVENT_LABELS: Record<MetricContractEventAction, string> = {
@@ -19,13 +20,25 @@ const EVENT_LABELS: Record<MetricContractEventAction, string> = {
 const NO_STEWARD = 'none';
 export const formatTime = (value: string | null) => (value ? new Date(value).toLocaleString('vi-VN') : '');
 
-/** Reads the parsed formula as one sentence, so a reviewer need not decode the CASE WHEN. */
+function FormulaTerm({ term }: { term: MetricFormulaTerm }) {
+  const measure = term.measure_column ?? term.measure_constant ?? '—';
+  return (
+    <>
+      <code>{term.aggregation}</code> của <code>{measure}</code>
+      {term.condition ? <>, chỉ tính các dòng có <code>{term.condition}</code></> : null}
+    </>
+  );
+}
+
+/** Reads the parsed formula as one sentence, so a reviewer need not decode the CASE WHEN or the ratio. */
 function FormulaSummary({ formula }: { formula: MetricFormula }) {
-  const measure = formula.measure_column ?? formula.measure_constant ?? '—';
+  if (!formula.denominator) {
+    return <p className="sl-metrics-formula-summary"><FormulaTerm term={formula} /></p>;
+  }
+  const ratio = Number(formula.scale) === 100 ? 'Tỷ lệ phần trăm' : `Tỷ lệ (nhân ${formula.scale})`;
   return (
     <p className="sl-metrics-formula-summary">
-      <code>{formula.aggregation}</code> của <code>{measure}</code>
-      {formula.condition ? <>, chỉ tính các dòng có <code>{formula.condition}</code></> : null}
+      {ratio} giữa (<FormulaTerm term={formula} />) và (<FormulaTerm term={formula.denominator} />)
     </p>
   );
 }

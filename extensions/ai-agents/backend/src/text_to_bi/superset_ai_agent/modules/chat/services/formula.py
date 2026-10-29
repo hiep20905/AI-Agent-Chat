@@ -60,6 +60,65 @@ def _condition(node: exp.Expression, column_part) -> list[Part]:
     raise _Untold
 
 
+def _told_aggregate(tree: exp.Expression, column_part) -> list[Part]:
+    """One contract aggregate as sentence parts; raises _Untold for anything else."""
+    if not isinstance(tree, (exp.Sum, exp.Avg, exp.Max, exp.Min, exp.Count)):
+        raise _Untold
+    measure, condition = tree.this, None
+    if isinstance(measure, exp.Case):
+        branches = measure.args.get("ifs") or []
+        default = measure.args.get("default")
+        if len(branches) != 1 or not (default is None or isinstance(default, exp.Null)):
+            raise _Untold
+        condition = _condition(branches[0].this, column_part)
+        measure = branches[0].args.get("true")
+    # COUNT of a constant and SUM of 1 both count the rows that meet the condition.
+    counts_constant = isinstance(tree, exp.Count) and (measure is None or isinstance(measure, (exp.Literal, exp.Star)))
+    sums_one = isinstance(tree, exp.Sum) and isinstance(measure, exp.Literal) and measure.this == "1"
+    counted_rows = counts_constant or sums_one
+    if counted_rows:
+        sentence = [_text("Đếm số dòng")]
+    elif isinstance(measure, exp.Column):
+        word = "Đếm số" if isinstance(tree, exp.Count) else _AGGREGATE_WORDS[tree.key.upper()]
+        sentence = [_text(f"{word} "), column_part(measure)]
+    elif isinstance(measure, (exp.Literal, exp.Neg)) and not isinstance(tree, exp.Count):
+        sentence = [_text(f"{_AGGREGATE_WORDS[tree.key.upper()]} giá trị "), *_value(measure)]
+    else:
+        raise _Untold
+    if condition is not None:
+        sentence += [_text(" có " if counted_rows else ", chỉ tính các dòng có "), *condition]
+    return sentence
+
+
+def _unwrapped(node: exp.Expression) -> exp.Expression:
+    while isinstance(node, exp.Paren):
+        node = node.this
+    return node
+
+
+def _lowercased(parts: list[Part]) -> list[Part]:
+    first = parts[0]["text"]
+    return [_text(first[:1].lower() + first[1:]), *parts[1:]]
+
+
+def _told_ratio(tree: exp.Expression, column_part) -> list[Part]:
+    """``scale * AGG(...) / NULLIF(AGG(...), 0)``, the ratio shape the Semantic Layer accepts."""
+    if not isinstance(tree, exp.Div):
+        raise _Untold
+    scaled, guarded = _unwrapped(tree.this), _unwrapped(tree.expression)
+    if not isinstance(scaled, exp.Mul) or not isinstance(guarded, exp.Nullif):
+        raise _Untold
+    left, right = _unwrapped(scaled.this), _unwrapped(scaled.expression)
+    scale, numerator = (left, right) if isinstance(left, exp.Literal) else (right, left)
+    if not isinstance(scale, exp.Literal) or not scale.is_number:
+        raise _Untold
+    ratio = "Tỷ lệ phần trăm" if float(scale.this) == 100 else f"Tỷ lệ (nhân {scale.this})"
+    return [
+        _text(f"{ratio} giữa ("), *_lowercased(_told_aggregate(numerator, column_part)),
+        _text(") và ("), *_lowercased(_told_aggregate(_unwrapped(guarded.this), column_part)), _text(")"),
+    ]
+
+
 def told_formula(expression: str, columns: list[dict[str, Any]]) -> list[Part] | None:
     """The formula as sentence parts; `columns` are the dataset's columns with their data dictionary labels."""
     labels = {column["name"]: column.get("label") or column["name"] for column in columns}
@@ -70,40 +129,15 @@ def told_formula(expression: str, columns: list[dict[str, Any]]) -> list[Part] |
         return {"column": node.name, "label": labels[node.name]}
 
     try:
-        tree = sqlglot.parse_one(expression, read="postgres")
+        tree = _unwrapped(sqlglot.parse_one(expression, read="postgres"))
     except SqlglotError:
         return None
-    if not isinstance(tree, (exp.Sum, exp.Avg, exp.Max, exp.Min, exp.Count)):
-        return None
-    measure, condition = tree.this, None
     try:
-        if isinstance(measure, exp.Case):
-            branches = measure.args.get("ifs") or []
-            default = measure.args.get("default")
-            if len(branches) != 1 or not (default is None or isinstance(default, exp.Null)):
-                return None
-            condition = _condition(branches[0].this, column_part)
-            measure = branches[0].args.get("true")
-        # COUNT of a constant and SUM of 1 both count the rows that meet the condition.
-        counts_constant = isinstance(tree, exp.Count) and (
-            measure is None or isinstance(measure, (exp.Literal, exp.Star))
-        )
-        sums_one = isinstance(tree, exp.Sum) and isinstance(measure, exp.Literal) and measure.this == "1"
-        counted_rows = counts_constant or sums_one
-        if counted_rows:
-            sentence = [_text("Đếm số dòng")]
-        elif isinstance(measure, exp.Column):
-            word = "Đếm số" if isinstance(tree, exp.Count) else _AGGREGATE_WORDS[tree.key.upper()]
-            sentence = [_text(f"{word} "), column_part(measure)]
-        elif isinstance(measure, (exp.Literal, exp.Neg)) and not isinstance(tree, exp.Count):
-            sentence = [_text(f"{_AGGREGATE_WORDS[tree.key.upper()]} giá trị "), *_value(measure)]
-        else:
-            return None
-        if condition is not None:
-            sentence += [_text(" có " if counted_rows else ", chỉ tính các dòng có "), *condition]
+        if isinstance(tree, exp.Div):
+            return _told_ratio(tree, column_part)
+        return _told_aggregate(tree, column_part)
     except _Untold:
         return None
-    return sentence
 
 
 def doubtful_result(result: dict[str, Any]) -> str | None:

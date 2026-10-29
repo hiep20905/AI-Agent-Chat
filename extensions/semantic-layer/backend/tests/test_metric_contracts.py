@@ -92,7 +92,6 @@ def test_contract_accepts_conditional_aggregates_over_dataset_columns(expression
         "AVG(CASE WHEN unknown_column = 'A' THEN nhiet_do_c END)",
         "AVG(DISTINCT nhiet_do_c)",
         "SUM(nhiet_do_c) FILTER (WHERE loai_quan_sat = 'A')",
-        "100.0 * COUNT(CASE WHEN tong_luong_mua_mm > 0 THEN 1 END) / NULLIF(COUNT(nhiet_do_c), 0)",
         "MAX(SUM(nhiet_do_c))",
         "COUNT(*)",
         "COUNT(1)",
@@ -120,10 +119,59 @@ def test_parse_contract_metric_separates_aggregation_measure_and_condition():
         "measure_column": None,
         "measure_constant": "1",
         "condition": "loai_quan_sat = 'DU_BAO_NGAY' AND tong_luong_mua_mm > 0",
+        "denominator": None,
+        "scale": None,
         "columns": ["loai_quan_sat", "tong_luong_mua_mm"],
     }
     assert parse_contract_metric("AVG(nhiet_do_c)").as_dict()["condition"] is None
     assert parse_contract_metric("SUM(a) / COUNT(b)") is None
+
+
+def test_parse_contract_metric_reads_a_ratio_of_two_contract_aggregates():
+    expression = (
+        "100.0 * COUNT(CASE WHEN loai_quan_sat = 'DU_BAO_NGAY' AND tong_luong_mua_mm > 0 THEN 1 END)"
+        " / NULLIF(COUNT(CASE WHEN loai_quan_sat = 'DU_BAO_NGAY' THEN 1 END), 0)"
+    )
+    formula = parse_contract_metric(expression).as_dict()
+    assert formula["aggregation"] == "COUNT" and formula["scale"] == "100.0"
+    assert formula["condition"] == "loai_quan_sat = 'DU_BAO_NGAY' AND tong_luong_mua_mm > 0"
+    assert formula["denominator"] == {
+        "aggregation": "COUNT",
+        "measure_column": None,
+        "measure_constant": "1",
+        "condition": "loai_quan_sat = 'DU_BAO_NGAY'",
+    }
+    assert parse_contract_metric("SUM(a) * 1.0 / NULLIF(SUM(b), 0)").as_dict()["scale"] == "1.0"
+    parenthesized = parse_contract_metric("(100.0 * SUM(a)) / NULLIF(SUM(b), 0.0)")
+    assert parenthesized.as_dict()["denominator"]["measure_column"] == "b"
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "100 * COUNT(a) / NULLIF(COUNT(b), 0)",
+        "100.0 * COUNT(a) / COUNT(b)",
+        "COUNT(a) / NULLIF(COUNT(b), 0) * 100.0",
+        "-1.0 * SUM(a) / NULLIF(SUM(b), 0)",
+        "100.0 * SUM(a) / NULLIF(SUM(b), 1)",
+        "100.0 * SUM(a / b) / NULLIF(SUM(c), 0)",
+        "100.0 * SUM(CASE WHEN a / b > 1 THEN 1 END) / NULLIF(SUM(c), 0)",
+        "100.0 * SUM(SUM(a)) / NULLIF(SUM(b), 0)",
+        "100.0 * SUM(t.a) / NULLIF(SUM(b), 0)",
+    ],
+)
+def test_a_ratio_needs_a_decimal_scale_a_guarded_denominator_and_contract_terms(expression):
+    assert parse_contract_metric(expression) is None
+
+
+def test_a_ratio_names_a_missing_denominator_column():
+    expression = "100.0 * COUNT(CASE WHEN loai_quan_sat = 'A' THEN 1 END) / NULLIF(COUNT(missing), 0)"
+    dataset, metric = _weather_objects(expression)
+    assert metric_contract_ineligibility(dataset, metric) == "Cột missing không có trong dataset."
+
+
+def test_the_hash_of_a_plain_metric_stays_the_same_so_existing_approvals_stay_current():
+    assert metric_contract_hash(*_objects()) == "dfeacb9e15b6bc5524ed83dabc77d9e7ef416dddf622e12cb5af46195f773928"
 
 
 def test_ineligibility_names_the_offending_column_or_dataset():

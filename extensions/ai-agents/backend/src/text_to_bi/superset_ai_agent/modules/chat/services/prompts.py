@@ -97,12 +97,14 @@ lưu ở trạng thái chờ duyệt; người hỏi nhận số liệu tạm t�
 gần giống. Metric đã có trong `metrics` của dataset (kể cả đang chờ duyệt) mà đo đúng đại lượng thì viết lại đúng công
 thức của nó để hệ thống dùng lại.
 `expression`: đúng một hàm AVG, COUNT, MAX, MIN hoặc SUM trên một cột của dataset, có thể ở dạng
-`AGG(CASE WHEN <điều kiện so cột với hằng số> THEN <cột hoặc số> END)`. Không dùng phép tính ngoài hàm, hàm khác,
-DISTINCT, truy vấn con hay cột của dataset khác. Theo đúng quy ước các công thức đã có trên dataset: nếu chúng lọc loại
-bản ghi (ví dụ `loai_quan_sat = 'DU_BAO_NGAY'` cho số liệu theo ngày)
-thì metric mới lọc cùng cách cho cùng loại số liệu.
+`AGG(CASE WHEN <điều kiện so cột với hằng số> THEN <cột hoặc số> END)`; hoặc tỷ lệ giữa hai hàm như vậy, viết đúng
+`100.0 * AGG(...) / NULLIF(AGG(...), 0)` (hệ số có dấu chấm thập phân, `1.0` khi không tính phần trăm). Ngoài dạng tỷ
+lệ đó, không dùng phép tính ngoài hàm, hàm khác, DISTINCT, truy vấn con hay cột của dataset khác. Theo đúng quy ước
+các công thức đã có trên dataset: nếu chúng lọc loại bản ghi (ví dụ `loai_quan_sat = 'DU_BAO_NGAY'` cho số liệu theo
+ngày) thì metric mới lọc cùng cách cho cùng loại số liệu, ở cả tử số và mẫu số.
 Chọn hàm theo nghĩa: lớn nhất là MAX, tổng là SUM, trung bình là AVG, đếm ngày thoả điều kiện là COUNT(CASE WHEN ...
-THEN 1 END). {CODED_VALUES_RULE}
+THEN 1 END), tỷ lệ hay phần trăm số ngày thoả điều kiện là `100.0 * COUNT(CASE WHEN <điều kiện> THEN 1 END) /
+NULLIF(COUNT(CASE WHEN <cùng loại bản ghi> THEN 1 END), 0)`. {CODED_VALUES_RULE}
 `metric_name`: tên kỹ thuật chữ thường không dấu nối bằng gạch dưới, ví dụ `gio_giat_toi_da`. `label`: tên tiếng Việt
 ngắn, ví dụ "Gió giật tối đa". `definition`: một câu nói metric đo gì và tính thế nào. `unit`: đơn vị theo cột, ví dụ
 "km/h", "giờ", "ngày", hoặc rỗng.
@@ -126,7 +128,8 @@ một cột ngày (`CAST(... AS DATE) AS ngay` nếu nguồn là thời điểm)
 hai câu nói mỗi dòng là gì và lấy từ đâu.
 `metric`: chỉ số trả lời câu hỏi trên các cột kết quả của câu SQL: `metric_name`, `label`, `definition`, `unit` như
 một metric thường, và `expression` là đúng một hàm AVG, COUNT, MAX, MIN hoặc SUM trên một cột kết quả, có thể ở dạng
-`AGG(CASE WHEN <so cột với hằng số> THEN <cột hoặc số> END)`. {CODED_VALUES_RULE} Cột kết quả lấy nguyên từ cột mã
+`AGG(CASE WHEN <so cột với hằng số> THEN <cột hoặc số> END)`, hoặc tỷ lệ `100.0 * AGG(...) / NULLIF(AGG(...), 0)`
+giữa hai hàm như vậy. {CODED_VALUES_RULE} Cột kết quả lấy nguyên từ cột mã
 giữ các `values` của cột nguồn.
 Nếu các dataset cơ sở cũng không có dữ liệu cho câu hỏi thì để `sql` rỗng, `metric` null và nói lý do ở `reason`.
 `reason`: một câu tiếng Việt.

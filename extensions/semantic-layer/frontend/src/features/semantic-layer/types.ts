@@ -98,11 +98,18 @@ export type MetricUser = { id: number; name: string };
 /** Review state of a metric: `outdated` is a candidate or approval whose metric changed after it was recorded. */
 export type MetricReviewState = 'not_started' | 'ineligible' | 'candidate' | 'approved' | 'outdated' | 'revoked';
 
-export type MetricFormula = {
+/** One aggregate of a contract formula. */
+export type MetricFormulaTerm = {
   aggregation: string;
   measure_column: string | null;
   measure_constant: string | null;
   condition: string | null;
+};
+
+/** A contract formula: its numerator's fields, plus a denominator and a scale when it is a ratio. */
+export type MetricFormula = MetricFormulaTerm & {
+  denominator: MetricFormulaTerm | null;
+  scale: string | null;
   columns: string[];
 };
 

@@ -398,7 +398,9 @@ class MetricContractRoutes:
         except SemanticLayerError:
             raise
         except ValueError as error:
-            raise MetricContractValidationError(str(error)) from error
+            # Superset's own message may name internals, so the client gets a fixed one.
+            logger.warning("Superset ChartData refused the metric query: %s", error)
+            raise MetricContractValidationError("Superset không nhận truy vấn metric này.") from error
         except Exception as error:
             db.session.rollback()
             if is_superset_access_error(error):
