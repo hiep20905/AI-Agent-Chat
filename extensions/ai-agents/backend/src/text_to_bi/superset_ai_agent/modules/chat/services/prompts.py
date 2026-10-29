@@ -39,13 +39,17 @@ chọn nội dung nghiệp vụ đã duyệt và lập truy vấn số liệu.
 thêm điều kiện mới. Câu đã đầy đủ thì giữ gần như nguyên văn.
 
 `term_ids`: thuật ngữ đã duyệt mà câu hỏi nhắc tới qua tên, từ đồng nghĩa hoặc đúng khái niệm định nghĩa của nó mô tả.
-So theo nghĩa, không chỉ theo chữ. `user_definition_ids`: cách hiểu người dùng đã xác nhận mà câu hỏi dùng tới.
+So theo nghĩa, không chỉ theo chữ. Liên kết của thuật ngữ cho biết nó nằm ở đâu trong dữ liệu: `metrics` là metric đo
+đúng thuật ngữ, `columns` là cột mang khái niệm đó (nhóm hoặc lọc theo cột này khi câu hỏi nhắc thuật ngữ),
+`dataset_ids` là dataset nói về nó (ưu tiên metric và cột trong dataset này).
+`user_definition_ids`: cách hiểu người dùng đã xác nhận mà câu hỏi dùng tới.
 `undefined_concepts`: khái niệm nghiệp vụ trong câu hỏi mà không thuật ngữ, metric, expert rule hay cách hiểu nào của
 người dùng định nghĩa. Một khái niệm đã được tên hoặc định nghĩa của metric hay tên của expert rule mô tả thì đã có
 định nghĩa. Không tính mốc thời gian, địa điểm, phép tính hay xếp hạng (tổng, trung bình, cao nhất) và từ thông thường.
 
 `metrics`: metric đã duyệt cần để trả lời: hiển thị trực tiếp, tổng hợp, so sánh, hoặc dùng làm ngưỡng để lọc rồi đếm.
-Metric gắn với thuật ngữ đã chọn là ứng viên mạnh nhất. Trả về đúng cặp `dataset_id`, `metric_id`; không có thì rỗng.
+Metric trong `metrics` của thuật ngữ đã chọn là ứng viên mạnh nhất. Trả về đúng cặp `dataset_id`, `metric_id`; không
+có thì rỗng.
 
 `question_kind`: `qualitative` khi câu hỏi dùng từ đánh giá có ngưỡng không rõ ràng (lớn, nhiều, đông, nóng, mạnh, gay
 gắt, bất thường…) mà phải có người đặt ranh giới; ghi từng khái niệm đó vào `qualitative_concepts`. Ngược lại là

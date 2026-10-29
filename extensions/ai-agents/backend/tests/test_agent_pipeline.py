@@ -342,7 +342,16 @@ def test_consumer_payloads_flatten_to_the_ids_the_agent_answers_with():
         "metric_id": 17, "metric_name": "max_temp", "verbose_name": "Nhiệt độ cao nhất", "unit": "°C",
         "business_definition": "Cao nhất.", "glossary_terms": [{"term_id": 3, "name": "Nắng nóng", "synonyms": []}],
     }
-    term = {"term_id": 3, "canonical_name": "Nắng nóng", "definition": "Nóng.", "synonyms": ["oi bức"], "links": []}
+    term = {
+        "term_id": 3, "canonical_name": "Nắng nóng", "definition": "Nóng.", "synonyms": ["oi bức"],
+        "links": [
+            {"kind": "metric", "dataset_id": 12, "column_name": None, "metric_id": 17},
+            # A metric the caller cannot query is left out, so the agent never picks it.
+            {"kind": "metric", "dataset_id": 12, "column_name": None, "metric_id": 99},
+            {"kind": "column", "dataset_id": 12, "column_name": "nhiet_do_cao_nhat_c", "metric_id": None},
+            {"kind": "dataset", "dataset_id": 12, "column_name": None, "metric_id": None},
+        ],
+    }
     rule = {
         "id": 1, "name": "Ngày nắng nóng gay gắt", "dataset_id": 12, "column_names": {"92": "Nhiệt độ cao nhất (°C)"},
         "condition_columns": {"92": "nhiet_do_cao_nhat_c"},
@@ -361,7 +370,12 @@ def test_consumer_payloads_flatten_to_the_ids_the_agent_answers_with():
         {"terms": [term]}, {"rules": [rule]}, members,
     )
 
-    assert catalog.glossary_terms == [{"id": 3, "name": "Nắng nóng", "synonyms": ["oi bức"], "definition": "Nóng."}]
+    assert catalog.glossary_terms == [{
+        "id": 3, "name": "Nắng nóng", "synonyms": ["oi bức"], "definition": "Nóng.",
+        "metrics": [{"dataset_id": 12, "metric_id": 17}],
+        "columns": [{"dataset_id": 12, "column": "nhiet_do_cao_nhat_c"}],
+        "dataset_ids": [12],
+    }]
     assert catalog.metrics[0]["glossary_term_ids"] == [3] and catalog.metrics[0]["name"] == "Nhiệt độ cao nhất"
     assert catalog.expert_rules[0]["conditions"] == ["Nhiệt độ cao nhất (°C) greater_than_or_equal 37"]
     assert catalog.expert_rules[0]["filters"] == [{"column": "nhiet_do_cao_nhat_c", "operator": ">=", "value": 37}]

@@ -202,7 +202,7 @@ def _described(items: list[dict[str, Any]], fields: tuple[str, ...]) -> list[dic
     return [{key: item.get(key) for key in fields if item.get(key) not in (None, "", [])} for item in items]
 
 
-TERM_FIELDS = ("id", "name", "synonyms", "definition")
+TERM_FIELDS = ("id", "name", "synonyms", "definition", "metrics", "columns", "dataset_ids")
 USER_DEFINITION_FIELDS = ("id", "kind", "name", "concept", "definition", "conditions")
 METRIC_FIELDS = ("dataset_id", "metric_id", "name", "definition", "unit", "glossary_term_ids")
 RULE_FIELDS = ("id", "name", "dataset_id", "conditions", "exceptions", "metric_ids", "glossary_term_ids")
@@ -561,7 +561,8 @@ def run_agent(
     built_metric = None
     if missing == ["metric"] and builder is not None and run_metric is not None:
         found = {
-            "glossary_terms": _described(chosen_terms, ("name", "definition")),
+            # A term's columns tell the metric draft which column the concept lives in.
+            "glossary_terms": _described(chosen_terms, ("name", "definition", "columns", "dataset_ids")),
             "expert_rules": _described(chosen_rules, ("name", "conditions")),
             "user_definitions": _described(used_definitions, ("name", "definition", "conditions")),
         }

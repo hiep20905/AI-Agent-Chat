@@ -80,6 +80,28 @@ def dataset_entry(dataset: dict[str, Any], members: dict[str, Any]) -> dict[str,
     }
 
 
+def term_entry(term: dict[str, Any], metric_keys: set[tuple[int, int]]) -> dict[str, Any]:
+    """A glossary term with what it names in the data: metrics the caller can query, columns and whole datasets."""
+    links = term.get("links") or []
+    return {
+        "id": term["term_id"],
+        "name": term["canonical_name"],
+        "synonyms": term.get("synonyms") or [],
+        "definition": term.get("definition"),
+        "metrics": [
+            {"dataset_id": link["dataset_id"], "metric_id": link["metric_id"]}
+            for link in links
+            if link.get("kind") == "metric" and (link["dataset_id"], link.get("metric_id")) in metric_keys
+        ],
+        "columns": [
+            {"dataset_id": link["dataset_id"], "column": link["column_name"]}
+            for link in links
+            if link.get("kind") == "column" and link.get("column_name")
+        ],
+        "dataset_ids": [link["dataset_id"] for link in links if link.get("kind") == "dataset"],
+    }
+
+
 def flatten_catalog(
     catalog: dict[str, Any],
     glossary: dict[str, Any],
@@ -87,15 +109,12 @@ def flatten_catalog(
     members_by_dataset: dict[int, dict[str, Any]] | None = None,
 ) -> SemanticCatalog:
     """Turn the consumer payloads into compact lists keyed by the IDs the agent must answer with."""
-    terms = [
-        {
-            "id": term["term_id"],
-            "name": term["canonical_name"],
-            "synonyms": term.get("synonyms") or [],
-            "definition": term.get("definition"),
-        }
-        for term in glossary.get("terms", [])
-    ]
+    metric_keys = {
+        (dataset["id"], metric["metric_id"])
+        for dataset in catalog.get("datasets", [])
+        for metric in dataset.get("metrics", [])
+    }
+    terms = [term_entry(term, metric_keys) for term in glossary.get("terms", [])]
     metrics = [
         {
             "dataset_id": dataset["id"],
