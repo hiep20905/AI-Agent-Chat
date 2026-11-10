@@ -334,6 +334,21 @@
 .sl-metrics-list { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 10px; overflow: auto; padding: 8px; }
 .sl-metrics-group { display: flex; flex-direction: column; gap: 1px; }
 .sl-metrics-group h4 { margin: 0 0 4px; padding: 0 6px; overflow: hidden; color: var(--sl-muted); font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.sl-group-heading { display: flex; align-items: center; gap: 4px; min-height: 26px; padding: 0 0 2px 4px; }
+.sl-group-toggle { flex: 1; min-width: 0; align-self: center; text-align: left; }
+.sl-group-toggle span:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-group-count { flex: 0 0 auto; padding: 0 6px; border-radius: 999px; background: var(--sl-surface-muted); font-weight: 500; letter-spacing: 0; }
+.sl-group-actions { display: inline-flex; flex: 0 0 auto; opacity: 0; transition: opacity 0.15s; }
+.sl-group-heading:hover .sl-group-actions, .sl-group-actions:focus-within { opacity: 1; }
+.sl-group-empty { margin: 0; padding: 4px 8px; font-size: 12px; }
+/* Reads as the fact's value next to its label; the frame shows only on hover so it does not look like a form field. */
+.sl-metrics-facts div:has(.sl-group-inline-select) { align-items: center; }
+.sl-group-inline-select {
+  height: 24px; margin: -3px 0; padding: 0 4px 0 6px; border-color: transparent; border-radius: 4px;
+  box-shadow: none; color: var(--sl-text); font-size: 13px; font-weight: 500;
+}
+.sl-group-inline-select:hover, .sl-group-inline-select[data-popup-open] { border-color: transparent; background: var(--sl-surface-muted); }
+.sl-group-inline-select:focus-visible { border-color: transparent; box-shadow: 0 0 0 2px color-mix(in srgb, var(--sl-accent) 35%, transparent); }
 .sl-metrics-item { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 0; border-radius: 6px; color: var(--sl-text); background: transparent; font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
 .sl-metrics-item:hover { background: var(--sl-surface-muted); }
 .sl-metrics-item.is-selected { background: color-mix(in srgb, var(--sl-accent) 14%, transparent); font-weight: 600; }

@@ -19,6 +19,28 @@ The three build on each other: metric → glossary term → expert rule. A term 
 it becomes outdated when a linked metric is revoked or its formula changes. A rule needs at least one approved term
 and takes its metrics from the terms it names, so a revoked metric or term also leaves the rule outdated.
 
+### Groups of terms and rules
+
+Administrators gather glossary terms with the same meaning into term groups (`text_to_bi_glossary_term_group`) and
+similar expert rules into rule groups (`text_to_bi_expert_rule_group`). The Glossary and Expert Rules lists show
+each group as a collapsible section, with the ungrouped members last under "Chưa phân nhóm".
+
+- A group has a name, unique without regard to case or spacing (a duplicate answers 409), and an optional
+  description. Creating, renaming or deleting a group needs no review.
+- The group belongs to the term or rule itself (`group_id` on `text_to_bi_glossary_term` and
+  `text_to_bi_expert_rule`), not to a revision. Moving a member takes effect at once, creates no revision, leaves
+  the content hash and the expert rule lifecycle version as they were, and keeps an approved term or rule serving,
+  so a move never makes it outdated or invalidates a pending approval. Each move is logged in the member's audit
+  trail as a `moved` event whose reason reads `old group → new group`.
+- Deleting a group that still has members moves them to "ungrouped" (each with a `moved` event) and keeps their
+  approval; nothing is refused.
+- A term or rule is put in a group from its detail panel, from the editor (a `group_id` in the create or draft
+  payload, applied outside the draft), or with `PUT .../glossary/<term_id>/group` and
+  `PUT .../expert-rules/<rule_id>/group` with `{"group_id": <id or null>}`. Groups are created with
+  `POST .../glossary/groups` and `POST .../expert-rules/groups`, and changed or deleted with `PUT` and `DELETE` on
+  `.../groups/<group_id>`. The admin lists (`GET .../glossary`, `GET .../expert-rules`) return `groups` and each
+  member's `group`.
+
 ## Consumer API
 
 Approved content reaches any consumer, such as a Text to BI agent, through read-only endpoints. Each returns only
@@ -62,6 +84,9 @@ approved again. The execute endpoint applies them: a caller filter on a column r
 `"time_grain"` groups the time column by another grain (never finer than the rows), and `"apply_defaults": false`
 skips them all. The response's `applied_defaults` lists what was applied. See
 [`docs/specs/metric-grain-moc-thoi-gian-bo-loc.md`](../../docs/specs/metric-grain-moc-thoi-gian-bo-loc.md).
+
+Each discovered term and rule also carries its `group` (`{"id": 2, "name": "Nhiệt độ"}`, or `null` when ungrouped),
+so a consumer can read terms of one meaning, or similar rules, together.
 
 ## Structure
 

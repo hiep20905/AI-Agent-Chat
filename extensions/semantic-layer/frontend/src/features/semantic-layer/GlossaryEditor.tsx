@@ -4,8 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { requestJson, semanticLayerApi } from './api';
+import { GroupSelect } from './ConceptGroups';
 import { OptionSelect } from './ExpertRuleEditor';
-import type { GlossaryDatasetOption, GlossaryLink, GlossaryReviewTerm, GlossaryTermPayload, MetricUser } from './types';
+import type {
+  ConceptGroup, GlossaryDatasetOption, GlossaryLink, GlossaryReviewTerm, GlossaryTermPayload, MetricUser,
+} from './types';
 
 /** A link row: the dataset, then `dataset`, `column:<name>` or `metric:<id>` for what in it the term names. */
 type LinkDraft = { key: number; datasetId: string; target: string };
@@ -64,14 +67,17 @@ type GlossaryEditorProps = {
   draft?: GlossaryDraft | null;
   datasets: GlossaryDatasetOption[];
   users: MetricUser[];
+  groups: ConceptGroup[];
   onCancel: () => void;
   onSaved: (termId: number) => void;
 };
 
 /** Writes a new term or the next draft of an existing one; saving always leaves a draft to approve. */
-export function GlossaryEditor({ term, draft, datasets, users, onCancel, onSaved }: GlossaryEditorProps) {
+export function GlossaryEditor({ term, draft, datasets, users, groups, onCancel, onSaved }: GlossaryEditorProps) {
   const revision = term?.current_revision ?? null;
   const [name, setName] = useState(term?.canonical_name ?? draft?.name ?? '');
+  // The group is not part of the draft: saving moves the term at once and keeps its approved revision serving.
+  const [groupId, setGroupId] = useState<number | null>(term?.group?.id ?? null);
   const [stewardId, setStewardId] = useState(String(term?.steward_id ?? NO_STEWARD));
   const [definition, setDefinition] = useState(revision?.definition ?? draft?.definition ?? '');
   const [synonyms, setSynonyms] = useState((revision?.synonyms ?? draft?.synonyms ?? []).join(', '));
@@ -118,6 +124,7 @@ export function GlossaryEditor({ term, draft, datasets, users, onCancel, onSaved
       synonyms: synonyms.split(',').map(value => value.trim()).filter(Boolean),
       steward_id: stewardId === NO_STEWARD ? null : Number(stewardId),
       links: filledLinks.map(buildLink),
+      group_id: groupId,
     };
     setSaving(true);
     setSaveError('');
@@ -148,6 +155,8 @@ export function GlossaryEditor({ term, draft, datasets, users, onCancel, onSaved
             onChange={event => setName(event.target.value)}
           />
         )}
+        <span className="sl-metric-trial-label">Nhóm</span>
+        <GroupSelect groups={groups} groupId={groupId} className="sl-rule-wide" onChange={setGroupId} />
         <span className="sl-metric-trial-label">Định nghĩa</span>
         <Textarea
           aria-label="Định nghĩa"

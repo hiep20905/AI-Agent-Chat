@@ -4,12 +4,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { expertRulesApi, requestJson } from './api';
+import { GroupSelect } from './ConceptGroups';
 import {
   columnValueKind, expertRuleErrorMessage, LIST_OPERATORS, OPERATOR_LABELS, VALUELESS_OPERATORS,
 } from './expertRuleFormat';
 import type {
-  ExpertRule, ExpertRuleColumnOption, ExpertRuleCondition, ExpertRuleConditionValue, ExpertRuleDatasetOption,
-  ExpertRuleOperator, ExpertRulePayload, ExpertRuleReference,
+  ConceptGroup, ExpertRule, ExpertRuleColumnOption, ExpertRuleCondition, ExpertRuleConditionValue,
+  ExpertRuleDatasetOption, ExpertRuleOperator, ExpertRulePayload, ExpertRuleReference,
 } from './types';
 
 type ConditionDraft = { key: number; columnId: string; operator: ExpertRuleOperator; valueText: string };
@@ -185,12 +186,15 @@ type ExpertRuleEditorProps = {
   rule: ExpertRule | null;
   draft?: ExpertRuleDraft | null;
   datasets: ExpertRuleDatasetOption[];
+  groups: ConceptGroup[];
   onCancel: () => void;
   onSaved: (ruleId: number) => void;
 };
 
 /** Writes a new rule or the next draft of an existing one; saving always leaves a draft for a second reviewer. */
-export function ExpertRuleEditor({ rule, draft, datasets, onCancel, onSaved }: ExpertRuleEditorProps) {
+export function ExpertRuleEditor({ rule, draft, datasets, groups, onCancel, onSaved }: ExpertRuleEditorProps) {
+  // The group is not part of the draft: saving moves the rule at once and keeps its approval.
+  const [groupId, setGroupId] = useState<number | null>(rule?.group?.id ?? null);
   const draftDatasetId = datasets.some(item => item.id === draft?.datasetId) ? draft?.datasetId : undefined;
   const [datasetId, setDatasetId] = useState<number | null>(
     rule?.dataset_id ?? draftDatasetId ?? datasets[0]?.id ?? null,
@@ -273,6 +277,7 @@ export function ExpertRuleEditor({ rule, draft, datasets, onCancel, onSaved }: E
       examples: filledPairs(examples).map(row => ({ question: row.first.trim(), intent: row.second.trim() })),
       glossary_term_ids: glossaryTermIds,
       metric_ids: inheritedMetricIds,
+      group_id: groupId,
     };
     if (payload.examples.length === 0) {
       setSaveError('Thêm ít nhất một câu hỏi mẫu.');
@@ -315,6 +320,8 @@ export function ExpertRuleEditor({ rule, draft, datasets, onCancel, onSaved }: E
           placeholder="Ví dụ: Ngày nắng nóng"
           onChange={event => setName(event.target.value)}
         />
+        <span className="sl-metric-trial-label">Nhóm</span>
+        <GroupSelect groups={groups} groupId={groupId} className="sl-rule-wide" onChange={setGroupId} />
         <span className="sl-metric-trial-label">Thuật ngữ</span>
         <ReferencePicker
           label="Thêm thuật ngữ"

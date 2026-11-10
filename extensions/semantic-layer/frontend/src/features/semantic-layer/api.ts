@@ -18,6 +18,9 @@ export const expertRulesApi = {
   approve: (ruleId: number) => `${EXPERT_RULES_API}/expert-rules/${encodeURIComponent(ruleId)}/approve`,
   revoke: (ruleId: number) => `${EXPERT_RULES_API}/expert-rules/${encodeURIComponent(ruleId)}/revoke`,
   audit: (ruleId: number) => `${EXPERT_RULES_API}/expert-rules/${encodeURIComponent(ruleId)}/audit`,
+  move: (ruleId: number) => `${EXPERT_RULES_API}/expert-rules/${encodeURIComponent(ruleId)}/group`,
+  groups: `${EXPERT_RULES_API}/expert-rules/groups`,
+  group: (groupId: number) => `${EXPERT_RULES_API}/expert-rules/groups/${encodeURIComponent(groupId)}`,
 };
 
 export const semanticLayerApi = {
@@ -86,6 +89,9 @@ export const semanticLayerApi = {
   glossaryRevoke: (termId: number) => `${SEMANTIC_LAYER_API}/glossary/${encodeURIComponent(termId)}/revoke`,
   glossaryAudit: (termId: number) => `${SEMANTIC_LAYER_API}/glossary/${encodeURIComponent(termId)}/audit`,
   glossaryDiscovery: `${SEMANTIC_LAYER_API}/glossary/discovery`,
+  glossaryMove: (termId: number) => `${SEMANTIC_LAYER_API}/glossary/${encodeURIComponent(termId)}/group`,
+  glossaryGroups: `${SEMANTIC_LAYER_API}/glossary/groups`,
+  glossaryGroup: (groupId: number) => `${SEMANTIC_LAYER_API}/glossary/groups/${encodeURIComponent(groupId)}`,
   datasetProposals: `${SEMANTIC_LAYER_API}/dataset-proposals`,
   datasetProposal: (proposalId: number) => `${SEMANTIC_LAYER_API}/dataset-proposals/${encodeURIComponent(proposalId)}`,
   datasetProposalCreate: (proposalId: number) => (

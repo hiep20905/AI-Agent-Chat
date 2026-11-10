@@ -11,6 +11,7 @@ from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 from text_to_bi.superset_semantic_layer.modules.glossary.exceptions import (
     GlossaryConflictError,
     GlossarySelfApprovalError,
+    GlossaryTermGroupNotFoundError,
     GlossaryTermNotFoundError,
     GlossaryValidationError,
 )
@@ -24,10 +25,18 @@ from text_to_bi.superset_semantic_layer.modules.glossary.services.validation imp
 )
 
 SERVICE_PATH = MODULES_PATH / "glossary" / "services" / "glossary.py"
+GROUP_SERVICE_PATH = MODULES_PATH / "glossary" / "services" / "group.py"
 REPOSITORY_PATHS = [
     MODULES_PATH / "glossary" / "repositories" / name for name in ("glossary_term.py", "glossary_term_revision.py")
 ]
-VALIDATION_HELPERS = ("content_hash", "normalize_glossary_payload", "validated_links")
+VALIDATION_HELPERS = (
+    "content_hash",
+    "normalize_glossary_payload",
+    "validated_links",
+    "group_id_of",
+    "normalize_group_payload",
+    "MAX_REASON_LENGTH",
+)
 
 
 def _payload(**overrides):
@@ -156,12 +165,21 @@ def _sqlite_service(users=(7, 8)):
     """The real service, repositories and dependencies on disposable SQLite tables; Superset is never imported."""
     base = declarative_base()
 
+    class GlossaryTermGroup(base):
+        __tablename__ = "glossary_term_group"
+        id = Column(Integer, primary_key=True)
+        name = Column(String, nullable=False)
+        normalized_name = Column(String, nullable=False, unique=True)
+        description = Column(String)
+
     class GlossaryTerm(base):
         __tablename__ = "glossary_term"
         id = Column(Integer, primary_key=True)
         canonical_name = Column(String, nullable=False)
         normalized_name = Column(String, nullable=False, unique=True)
         steward_id = Column(Integer)
+        group_id = Column(Integer, ForeignKey("glossary_term_group.id"))
+        group = relationship(GlossaryTermGroup)
 
     class GlossaryTermRevision(base):
         __tablename__ = "glossary_term_revision"
@@ -209,6 +227,7 @@ def _sqlite_service(users=(7, 8)):
     namespace = {
         "db": SimpleNamespace(session=session),
         "GlossaryTerm": GlossaryTerm,
+        "GlossaryTermGroup": GlossaryTermGroup,
         "GlossaryTermRevision": GlossaryTermRevision,
         "GlossaryTermLink": GlossaryTermLink,
         "GlossaryTermAuditEvent": GlossaryTermAuditEvent,
@@ -222,7 +241,8 @@ def _sqlite_service(users=(7, 8)):
     }
     service = [
         node
-        for node in ast.parse(SERVICE_PATH.read_text(encoding="utf-8")).body
+        for path in (GROUP_SERVICE_PATH, SERVICE_PATH)
+        for node in ast.parse(path.read_text(encoding="utf-8")).body
         if isinstance(node, (ast.FunctionDef, ast.Assign))
     ]
     compile_into(namespace, *service)
@@ -340,3 +360,103 @@ def test_only_the_current_draft_can_be_approved():
     session.commit()
     with pytest.raises(GlossaryValidationError, match="Only the current draft"):
         service.approve_revision(term_id, 1, 8, None, False)
+
+
+def test_a_group_has_a_trimmed_name_unique_without_case_and_an_optional_description():
+    assert validation.normalize_group_payload({"name": "  Nhiệt   độ ", "description": "  "}) == {
+        "name": "Nhiệt độ",
+        "normalized_name": "nhiệt độ",
+        "description": None,
+    }
+    for payload in (None, {}, {"name": "  "}, {"name": "x" * 256}, {"name": "A", "color": "red"}):
+        with pytest.raises(GlossaryValidationError):
+            validation.normalize_group_payload(payload)
+    assert validation.group_id_of({"group_id": None}) is None and validation.group_id_of({"group_id": 3}) == 3
+    with pytest.raises(GlossaryValidationError, match="Nhóm thuật ngữ không hợp lệ"):
+        validation.group_id_of({"group_id": True})
+
+
+def test_groups_are_created_renamed_and_refuse_a_name_another_group_has():
+    service, session = _sqlite_service()
+    heat = service.create_group({"name": "Nhiệt độ", "description": "Các cách gọi nhiệt độ"})
+    rain = service.create_group({"name": "Mưa"})
+    session.commit()
+
+    with pytest.raises(GlossaryConflictError, match="cùng tên"):
+        service.create_group({"name": " nhiệt  ĐỘ "})
+    with pytest.raises(GlossaryConflictError, match="cùng tên"):
+        service.update_group(rain.id, {"name": "Nhiệt độ"})
+    session.rollback()
+    renamed = service.update_group(heat.id, {"name": "Nhiệt độ không khí", "description": None})
+    session.commit()
+    assert (renamed.name, renamed.description) == ("Nhiệt độ không khí", None)
+    with pytest.raises(GlossaryTermGroupNotFoundError):
+        service.update_group(404, {"name": "Khác"})
+
+
+def test_moving_an_approved_term_keeps_it_serving_without_a_new_revision_and_audits_the_move():
+    service, session = _sqlite_service()
+    heat = service.create_group({"name": "Nhiệt độ"})
+    rain = service.create_group({"name": "Mưa"})
+    term_id = service.create_draft(_payload(group_id=heat.id), 7).term_id
+    service.approve_revision(term_id, 1, 8, None, False)
+    session.commit()
+    assert service.glossary_term_repository().get(term_id).group_id == heat.id
+
+    service.move_term(term_id, rain.id, 8)
+    service.move_term(term_id, rain.id, 8)
+    service.move_term(term_id, None, 8)
+    session.commit()
+
+    revisions = service.glossary_term_revision_repository()
+    assert [revision.revision_number for revision in revisions.for_term(term_id)] == [1]
+    assert revisions.serving_for(term_id).status == "approved"
+    events = service.glossary_term_audit_event_repository().for_term(term_id)
+    assert [(event.event_type, event.reason) for event in events] == [
+        ("created", None),
+        ("approved", None),
+        ("moved", "Nhiệt độ → Mưa"),
+        ("moved", "Mưa → Chưa phân nhóm"),
+    ]
+    with pytest.raises(GlossaryTermGroupNotFoundError):
+        service.move_term(term_id, 404, 8)
+    with pytest.raises(GlossaryTermNotFoundError):
+        service.move_term(404, rain.id, 8)
+
+
+def test_an_edit_moves_the_term_at_once_while_its_draft_waits_and_keeps_the_group_when_it_names_none():
+    service, session = _sqlite_service()
+    heat = service.create_group({"name": "Nhiệt độ"})
+    term_id = service.create_draft(_payload(), 7).term_id
+    service.approve_revision(term_id, 1, 8, None, False)
+    service.update_draft(term_id, _payload(definition="Revenue net of returns.", group_id=heat.id), 1, 7)
+    session.commit()
+    assert service.glossary_term_repository().get(term_id).group_id == heat.id
+    assert service.glossary_term_revision_repository().serving_for(term_id).revision_number == 1
+
+    service.update_draft(term_id, _payload(definition="Revenue after returns."), 2, 7)
+    session.commit()
+    assert service.glossary_term_repository().get(term_id).group_id == heat.id
+    with pytest.raises(GlossaryTermGroupNotFoundError):
+        service.create_draft(_payload(canonical_name="Sales", group_id=404), 7)
+
+
+def test_deleting_a_group_leaves_its_terms_ungrouped_and_approved():
+    service, session = _sqlite_service()
+    heat = service.create_group({"name": "Nhiệt độ"})
+    first = service.create_draft(_payload(group_id=heat.id), 7).term_id
+    second = service.create_draft(_payload(canonical_name="Sales", group_id=heat.id), 7).term_id
+    service.approve_revision(first, 1, 8, None, False)
+    session.commit()
+
+    assert service.delete_group(heat.id, 8) == [first, second]
+    session.commit()
+
+    terms = service.glossary_term_repository()
+    assert terms.get(first).group_id is None and terms.get(second).group_id is None
+    assert service.glossary_term_group_repository().by_name() == []
+    assert service.glossary_term_revision_repository().serving_for(first).revision_number == 1
+    events = service.glossary_term_audit_event_repository().for_term(second)
+    assert (events[-1].event_type, events[-1].reason) == ("moved", "Nhiệt độ → Chưa phân nhóm")
+    with pytest.raises(GlossaryTermGroupNotFoundError):
+        service.delete_group(heat.id, 8)

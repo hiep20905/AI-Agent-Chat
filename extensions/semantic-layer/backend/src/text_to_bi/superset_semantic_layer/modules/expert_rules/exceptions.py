@@ -19,3 +19,7 @@ class ExpertRuleSelfApprovalError(SelfApprovalError):
 
 class ExpertRuleNotFoundError(NotFoundError):
     message = "Expert rule not found."
+
+
+class ExpertRuleGroupNotFoundError(NotFoundError):
+    message = "Không tìm thấy nhóm rule."

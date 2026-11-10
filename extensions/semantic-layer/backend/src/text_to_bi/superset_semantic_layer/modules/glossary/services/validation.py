@@ -44,9 +44,35 @@ def review_reason(payload: Any) -> str | None:
     return reason.strip() or None
 
 
+def group_id_of(payload: Any) -> int | None:
+    """The group a request puts a term in; null takes the term out of every group."""
+    group_id = payload.get("group_id") if isinstance(payload, dict) else None
+    if group_id is not None and (isinstance(group_id, bool) or not isinstance(group_id, int)):
+        raise GlossaryValidationError("Nhóm thuật ngữ không hợp lệ.")
+    return group_id
+
+
+def normalize_group_payload(payload: Any) -> dict[str, Any]:
+    """A group's name, trimmed and unique without regard to case or spacing, and its optional description."""
+    if not isinstance(payload, dict) or set(payload) - {"name", "description"}:
+        raise GlossaryValidationError("Nhóm thuật ngữ chỉ có tên và mô tả.")
+    name = payload.get("name")
+    if not isinstance(name, str) or not (name := " ".join(name.split())):
+        raise GlossaryValidationError("Nhập tên nhóm thuật ngữ.")
+    if len(name) > MAX_NAME_LENGTH:
+        raise GlossaryValidationError("Tên nhóm thuật ngữ quá dài.")
+    description = payload.get("description")
+    if description is not None and not isinstance(description, str):
+        raise GlossaryValidationError("Mô tả nhóm thuật ngữ không hợp lệ.")
+    description = (description or "").strip() or None
+    if description is not None and len(description) > MAX_DEFINITION_LENGTH:
+        raise GlossaryValidationError("Mô tả nhóm thuật ngữ quá dài.")
+    return {"name": name, "normalized_name": normalized_name(name), "description": description}
+
+
 def normalize_glossary_payload(payload: Any) -> dict[str, Any]:
     """Reject unknown fields and canonicalize text before persistence."""
-    if not isinstance(payload, dict) or set(payload) - CONTENT_FIELDS - {"expected_revision"}:
+    if not isinstance(payload, dict) or set(payload) - CONTENT_FIELDS - {"expected_revision", "group_id"}:
         raise GlossaryValidationError("Unsupported glossary fields.")
     name = _required_text(payload.get("canonical_name"), "canonical_name", MAX_NAME_LENGTH)
     definition = _required_text(payload.get("definition"), "definition", MAX_DEFINITION_LENGTH)

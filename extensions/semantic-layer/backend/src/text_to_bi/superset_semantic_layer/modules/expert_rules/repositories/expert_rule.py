@@ -11,6 +11,9 @@ class ExpertRuleRepository(BaseRepository[ExpertRule]):
     def by_normalized_name(self, normalized_name: str) -> ExpertRule | None:
         return self.query().filter_by(normalized_name=normalized_name).one_or_none()
 
+    def in_group(self, group_id: int) -> list[ExpertRule]:
+        return self.query().filter_by(group_id=group_id).order_by(ExpertRule.id).all()
+
     def find(self, rule_id: int) -> ExpertRule | None:
         """Read a rule with a query rather than the identity map, so it reflects a row just locked."""
         return self.query().filter(ExpertRule.id == rule_id).one_or_none()

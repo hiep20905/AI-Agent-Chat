@@ -5,10 +5,15 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import JSON, Boolean, Column, Integer, String, create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import JSON, Boolean, Column, ForeignKey, Integer, String, create_engine
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
+from text_to_bi.superset_semantic_layer.modules.expert_rules.exceptions import (
+    ExpertRuleGroupNotFoundError,
+    ExpertRuleNotFoundError,
+)
 from text_to_bi.superset_semantic_layer.modules.expert_rules.services import expert_rule as service
+from text_to_bi.superset_semantic_layer.modules.expert_rules.services import expert_rule_group as group_service
 
 
 def _payload(**overrides):
@@ -341,11 +346,20 @@ def _lifecycle_session(monkeypatch):
     """Use disposable SQLite tables; never import or connect to Superset metadata."""
     base = declarative_base()
 
+    class Group(base):
+        __tablename__ = "groups"
+        id = Column(Integer, primary_key=True)
+        name = Column(String, nullable=False)
+        normalized_name = Column(String, nullable=False, unique=True)
+        description = Column(String)
+
     class Rule(base):
         __tablename__ = "rules"
         id = Column(Integer, primary_key=True)
         normalized_name = Column(String, nullable=False, unique=True)
         dataset_id = Column(Integer, nullable=False)
+        group_id = Column(Integer, ForeignKey("groups.id"))
+        group = relationship(Group)
 
     class Revision(base):
         __tablename__ = "revisions"
@@ -390,7 +404,7 @@ def _lifecycle_session(monkeypatch):
     base.metadata.create_all(engine)
     module = types.ModuleType("text_to_bi.superset_semantic_layer.modules.expert_rules.models")
     module.ExpertRule, module.ExpertRuleRevision = Rule, Revision
-    module.ExpertRuleLink, module.ExpertRuleAuditEvent = Link, Audit
+    module.ExpertRuleLink, module.ExpertRuleAuditEvent, module.ExpertRuleGroup = Link, Audit, Group
     monkeypatch.setitem(sys.modules, module.__name__, module)
     # A repository binds its model when imported, so import the repositories again with these tables.
     for name in [name for name in sys.modules if name.startswith(f"{service.__package__[:-9]}.repositories.")]:
@@ -606,3 +620,71 @@ def test_a_rule_must_build_on_at_least_one_glossary_term():
             lambda _: None,
             lambda _: None,
         )
+
+
+def test_a_rule_group_name_is_prose_unique_without_case_and_the_group_id_is_an_integer_or_null():
+    assert group_service.normalize_group_payload({"name": " Lọc  bản ghi ", "description": ""}) == {
+        "name": "Lọc bản ghi",
+        "normalized_name": "lọc bản ghi",
+        "description": None,
+    }
+    for payload in (None, {"name": " "}, {"name": "x" * 256}, {"name": "DROP TABLE rules"}, {"name": "A", "x": 1}):
+        with pytest.raises(service.ExpertRuleValidationError):
+            group_service.normalize_group_payload(payload)
+    assert group_service.rule_group_id({"group_id": None}) is None and group_service.rule_group_id({"group_id": 2}) == 2
+    with pytest.raises(service.ExpertRuleValidationError, match="Nhóm rule không hợp lệ"):
+        group_service.rule_group_id({"group_id": "2"})
+
+
+def test_moving_an_approved_rule_keeps_its_revision_and_token_and_audits_the_move(monkeypatch):
+    session, rule_model, revision_model, audit_model = _lifecycle_session(monkeypatch)
+    resolvers = _lifecycle_resolvers()
+    filters = group_service.create_rule_group(session, {"name": "Lọc bản ghi", "description": "Loại bản ghi tạm"})
+    limits = group_service.create_rule_group(session, {"name": "Ngưỡng"})
+    created = service.create_draft(session, _payload(group_id=filters.id), 11, *resolvers)
+    service.approve_rule(session, created, 1, 12)
+    session.commit()
+    rule_id = created.rule_id
+    assert session.get(rule_model, rule_id).group_id == filters.id
+    with pytest.raises(service.ExpertRuleConflictError, match="cùng tên"):
+        group_service.create_rule_group(session, {"name": "ngưỡng"})
+    session.rollback()
+
+    group_service.move_rule(session, rule_id, limits.id, 12)
+    group_service.move_rule(session, rule_id, None, 12)
+    session.commit()
+
+    revision = session.query(revision_model).one()
+    assert (revision.status, revision.revision_number, revision.lifecycle_version) == ("approved", 1, 2)
+    events = session.query(audit_model).order_by(audit_model.id).all()
+    assert [(event.event_type, event.reason, event.lifecycle_version) for event in events] == [
+        ("created", None, 1),
+        ("approved", None, 2),
+        ("moved", "Lọc bản ghi → Ngưỡng", 2),
+        ("moved", "Ngưỡng → Chưa phân nhóm", 2),
+    ]
+    # The move did not touch the lifecycle version, so a client still holding it can revoke.
+    service.revoke_rule(session, revision, 2, 12, "superseded")
+    with pytest.raises(ExpertRuleGroupNotFoundError):
+        group_service.move_rule(session, rule_id, 404, 12)
+    with pytest.raises(ExpertRuleNotFoundError):
+        group_service.move_rule(session, 404, None, 12)
+
+
+def test_an_edit_moves_the_rule_and_a_deleted_group_leaves_its_rules_ungrouped(monkeypatch):
+    session, rule_model, _, audit_model = _lifecycle_session(monkeypatch)
+    resolvers = _lifecycle_resolvers()
+    filters = group_service.create_rule_group(session, {"name": "Lọc bản ghi"})
+    created = service.create_draft(session, _payload(), 11, *resolvers)
+    session.commit()
+    updated = service.update_draft(session, created, _payload(group_id=filters.id), 1, 11, *resolvers)
+    session.commit()
+    assert updated.content_hash == created.content_hash
+    assert session.get(rule_model, created.rule_id).group_id == filters.id
+
+    renamed = group_service.update_rule_group(session, filters.id, {"name": "Lọc dữ liệu"})
+    assert group_service.delete_rule_group(session, renamed.id, 12) == [created.rule_id]
+    session.commit()
+    assert session.get(rule_model, created.rule_id).group_id is None
+    moves = session.query(audit_model).filter_by(event_type="moved").order_by(audit_model.id)
+    assert [event.reason for event in moves] == ["Chưa phân nhóm → Lọc bản ghi", "Lọc dữ liệu → Chưa phân nhóm"]

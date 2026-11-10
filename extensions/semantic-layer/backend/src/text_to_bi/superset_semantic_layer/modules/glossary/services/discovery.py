@@ -56,10 +56,13 @@ def discoverable_glossary_terms() -> list[dict[str, Any]]:
             )
         if not visible_links:
             continue
+        group = revision.term.group
         terms.append(
             {
                 "term_id": revision.term_id,
                 "canonical_name": revision.term.canonical_name,
+                # Terms of one group mean the same or nearly the same, so a consumer can read them together.
+                "group": {"id": group.id, "name": group.name} if group else None,
                 "definition": revision.definition,
                 "synonyms": revision.synonyms or [],
                 "links": visible_links,

@@ -18,6 +18,10 @@ ADMIN_ENDPOINTS = {
     "approve_glossary": ("/glossary/<int:term_id>/approve", "POST"),
     "revoke_glossary": ("/glossary/<int:term_id>/revoke", "POST"),
     "glossary_audit": ("/glossary/<int:term_id>/audit", "GET"),
+    "move_glossary_term": ("/glossary/<int:term_id>/group", "PUT"),
+    "create_glossary_group": ("/glossary/groups", "POST"),
+    "update_glossary_group": ("/glossary/groups/<int:group_id>", "PUT"),
+    "delete_glossary_group": ("/glossary/groups/<int:group_id>", "DELETE"),
 }
 
 

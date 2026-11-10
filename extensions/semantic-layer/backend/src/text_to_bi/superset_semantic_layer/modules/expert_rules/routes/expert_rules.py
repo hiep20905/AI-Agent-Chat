@@ -28,12 +28,13 @@ from ...superset.services.datasets import get_dataset
 from ...superset.services.users import user_names
 from ..dependencies import (
     expert_rule_audit_event_repository,
+    expert_rule_group_repository,
     expert_rule_link_repository,
     expert_rule_repository,
     expert_rule_revision_repository,
 )
 from ..exceptions import ExpertRuleNotFoundError, ExpertRuleValidationError
-from ..models import ExpertRuleLink, ExpertRuleRevision
+from ..models import ExpertRuleGroup, ExpertRuleLink, ExpertRuleRevision
 from ..services.expert_rule import (
     approve_rule,
     create_draft,
@@ -41,6 +42,14 @@ from ..services.expert_rule import (
     revoke_rule,
     rule_is_discoverable,
     update_draft,
+)
+from ..services.expert_rule_group import (
+    create_rule_group,
+    delete_rule_group,
+    group_reference,
+    move_rule,
+    rule_group_id,
+    update_rule_group,
 )
 
 
@@ -274,6 +283,64 @@ class ExpertRuleAPI(RestApi):
             rule_id,
         )
 
+    @staticmethod
+    def _group(group: ExpertRuleGroup) -> dict[str, Any]:
+        return {"id": group.id, "name": group.name, "description": group.description}
+
+    @expose("/expert-rules/<int:rule_id>/group", methods=["PUT"])
+    @protect()
+    @safe
+    @permission_name("write")
+    @csrf_protected
+    @rollback_on_error
+    @handle_errors
+    def move(self, rule_id: int):
+        """Move a rule into a group, or out of every group with a null `group_id`; no review is needed."""
+        require_admin()
+        rule = move_rule(db.session, rule_id, rule_group_id(request.get_json(silent=True)), current_user.id)
+        db.session.commit()
+        return self.response(200, rule_id=rule.id, group=group_reference(rule.group))
+
+    @expose("/expert-rules/groups", methods=["POST"])
+    @protect()
+    @safe
+    @permission_name("write")
+    @csrf_protected
+    @rollback_on_error
+    @handle_errors
+    def create_group(self):
+        require_admin()
+        group = create_rule_group(db.session, request.get_json(silent=True))
+        db.session.commit()
+        return self.response(201, group=self._group(group))
+
+    @expose("/expert-rules/groups/<int:group_id>", methods=["PUT"])
+    @protect()
+    @safe
+    @permission_name("write")
+    @csrf_protected
+    @rollback_on_error
+    @handle_errors
+    def update_group(self, group_id: int):
+        require_admin()
+        group = update_rule_group(db.session, group_id, request.get_json(silent=True))
+        db.session.commit()
+        return self.response(200, group=self._group(group))
+
+    @expose("/expert-rules/groups/<int:group_id>", methods=["DELETE"])
+    @protect()
+    @safe
+    @permission_name("write")
+    @csrf_protected
+    @rollback_on_error
+    @handle_errors
+    def delete_group(self, group_id: int):
+        """Delete a group; its rules become ungrouped and keep their approval."""
+        require_admin()
+        moved_rule_ids = delete_rule_group(db.session, group_id, current_user.id)
+        db.session.commit()
+        return self.response(200, moved_rule_ids=moved_rule_ids)
+
     @expose("/expert-rules/<int:rule_id>/audit", methods=["GET"])
     @protect()
     @safe
@@ -377,6 +444,7 @@ class ExpertRuleAPI(RestApi):
                     **self._serialize(revision),
                     "dataset_id": rule.dataset_id if rule else None,
                     "dataset_name": getattr(dataset, "table_name", None),
+                    "group": group_reference(rule.group) if rule else None,
                     "state": self._review_state(revision, links),
                     "column_names": {str(column_id): self._column_name(column_id) for column_id in column_ids},
                     "glossary_terms": [
@@ -399,7 +467,11 @@ class ExpertRuleAPI(RestApi):
             )
         rules.sort(key=lambda item: item["name"].casefold())
         return self.response(
-            200, rules=rules, current_user_id=current_user.id, require_second_reviewer=second_reviewer_required()
+            200,
+            rules=rules,
+            groups=[self._group(group) for group in expert_rule_group_repository().by_name()],
+            current_user_id=current_user.id,
+            require_second_reviewer=second_reviewer_required(),
         )
 
     @expose("/expert-rules/options", methods=["GET"])
@@ -486,6 +558,8 @@ class ExpertRuleAPI(RestApi):
                         # Let a consumer join a rule to catalog metrics and terms and read its conditions by
                         # column name.
                         "dataset_id": rule.dataset_id,
+                        # Rules of one group are alike, so a consumer can read them together.
+                        "group": group_reference(rule.group),
                         "metric_ids": sorted(link.target_id for link in links if link.kind == "metric"),
                         "glossary_term_ids": sorted(link.target_id for link in links if link.kind == "glossary"),
                         "column_names": {str(column_id): self._column_name(column_id) for column_id in column_ids},

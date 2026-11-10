@@ -195,8 +195,13 @@ formula edit), listed in `/semantic-catalog` and applied by metric execution unl
 `text_to_bi_dataset_proposal` holds the virtual datasets the AI
 Agent drafts over base (`dm_*`, `tb_*`) datasets when no aggregate dataset can
 answer a question; an administrator creates or rejects them in "Xử lý câu hỏi" →
-"Đề xuất dataset". Opening the Semantic Layer as an administrator creates these
-tables and seeds dictionary rows from the existing Superset datasets.
+"Đề xuất dataset". `text_to_bi_glossary_term_group` gathers glossary terms with
+the same meaning and `text_to_bi_expert_rule_group` similar expert rules; a
+term's or rule's `group_id` sits on the term or rule, not on a revision, so
+moving one needs no review, keeps it approved and is logged as a `moved` audit
+event, and deleting a group leaves its members ungrouped (see the extension
+README). Opening the Semantic Layer as an administrator creates these tables
+and seeds dictionary rows from the existing Superset datasets.
 
 ## Code style
 

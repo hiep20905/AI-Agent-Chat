@@ -38,8 +38,8 @@ thuộc một nghiệp vụ.
 | --- | --- |
 | `data_dictionary` | Từ điển dataset và cột, grain, chỉ số, AI AutoFill (`autofill/`) |
 | `business_model` | Tầng dữ liệu, nghiệp vụ, canvas và lineage |
-| `glossary` | Thuật ngữ nghiệp vụ, vòng đời duyệt, khám phá thuật ngữ |
-| `expert_rules` | Expert rule, vòng đời duyệt, khám phá rule (API riêng `ExpertRuleAPI`) |
+| `glossary` | Thuật ngữ nghiệp vụ, nhóm thuật ngữ cùng nghĩa, vòng đời duyệt, khám phá thuật ngữ |
+| `expert_rules` | Expert rule, nhóm rule tương đồng, vòng đời duyệt, khám phá rule (API riêng `ExpertRuleAPI`) |
 | `semantic_query` | Metric contract, relationship contract, semantic catalog, biên dịch và chạy truy vấn |
 | `agent_ladder` | Metric tạm tính và đề xuất dataset do AI Agent tạo |
 | `superset` | Dataset, database và người dùng của Superset: chỉ đọc, không có bảng riêng |

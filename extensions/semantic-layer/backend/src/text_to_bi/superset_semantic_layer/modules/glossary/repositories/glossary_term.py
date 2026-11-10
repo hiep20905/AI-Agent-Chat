@@ -14,6 +14,9 @@ class GlossaryTermRepository(BaseRepository[GlossaryTerm]):
     def by_normalized_name(self, normalized_name: str) -> GlossaryTerm | None:
         return self.query().filter_by(normalized_name=normalized_name).one_or_none()
 
+    def in_group(self, group_id: int) -> list[GlossaryTerm]:
+        return self.query().filter_by(group_id=group_id).order_by(GlossaryTerm.id).all()
+
     def lock(self, term_id: int) -> GlossaryTerm | None:
         """Re-read a term and hold its row lock until the transaction ends."""
         return self.query().filter(GlossaryTerm.id == term_id).populate_existing().with_for_update().one_or_none()

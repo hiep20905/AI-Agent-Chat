@@ -210,6 +210,10 @@ export type MetricAppliedDefaults = {
   time_grain: MetricGrain | null;
 };
 
+/** A group of glossary terms with the same meaning, or of similar expert rules; membership needs no review. */
+export type ConceptGroup = { id: number; name: string; description: string | null };
+export type ConceptGroupReference = Pick<ConceptGroup, 'id' | 'name'>;
+
 export type GlossaryStatus = 'draft' | 'approved' | 'revoked';
 /** Review state of a term: `outdated` is an approval whose linked column or metric changed since it was saved. */
 export type GlossaryState = GlossaryStatus | 'outdated';
@@ -239,6 +243,7 @@ export type GlossaryTerm = {
   id: number;
   canonical_name: string;
   steward_id: number | null;
+  group: ConceptGroupReference | null;
   current_revision?: GlossaryRevision | null;
   revisions?: GlossaryRevision[];
 };
@@ -256,6 +261,7 @@ export type GlossaryReviewTerm = GlossaryTerm & {
 };
 export type GlossaryTermList = {
   terms: GlossaryReviewTerm[];
+  groups: ConceptGroup[];
   users: MetricUser[];
   current_user_id: number | null;
   require_second_reviewer: boolean;
@@ -269,7 +275,8 @@ export type GlossaryDatasetOption = {
 };
 export type GlossaryAuditEvent = {
   id: number;
-  action: 'created' | 'updated' | 'approved' | 'revoked';
+  /** `moved`: the term changed group; the reason reads "old group → new group". */
+  action: 'created' | 'updated' | 'approved' | 'revoked' | 'moved';
   revision_number: number | null;
   actor_id: number | null;
   actor_name: string | null;
@@ -282,6 +289,7 @@ export type GlossaryTermPayload = {
   synonyms: string[];
   steward_id: number | null;
   links: Array<Pick<GlossaryLink, 'kind' | 'dataset_id' | 'column_name' | 'metric_id'>>;
+  group_id?: number | null;
 };
 
 export type SupersetDatabase = {
@@ -618,6 +626,7 @@ export type ExpertRule = {
   examples: ExpertRuleExample[];
   dataset_id: number | null;
   dataset_name: string | null;
+  group: ConceptGroupReference | null;
   state: ExpertRuleState;
   /** Display names of the dictionary columns the conditions use, keyed by column dictionary ID. */
   column_names: Record<string, string>;
@@ -690,10 +699,16 @@ export type AgentUserDefinition = {
   updated_on: string | null;
 };
 
-export type ExpertRuleList = { rules: ExpertRule[]; current_user_id: number | null; require_second_reviewer: boolean };
+export type ExpertRuleList = {
+  rules: ExpertRule[];
+  groups: ConceptGroup[];
+  current_user_id: number | null;
+  require_second_reviewer: boolean;
+};
 
 export type ExpertRuleAuditEntry = {
-  action: 'created' | 'updated' | 'approved' | 'revoked';
+  /** `moved`: the rule changed group; the reason reads "old group → new group". */
+  action: 'created' | 'updated' | 'approved' | 'revoked' | 'moved';
   revision: number;
   lifecycle_version: number;
   actor_id: number | null;
@@ -725,4 +740,5 @@ export type ExpertRulePayload = {
   examples: ExpertRuleExample[];
   glossary_term_ids: number[];
   metric_ids: number[];
+  group_id?: number | null;
 };

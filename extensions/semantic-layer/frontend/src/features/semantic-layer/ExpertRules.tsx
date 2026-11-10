@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Ban, Check, ChevronRight, LoaderCircle, Pencil, Plus, RotateCcw, Search } from 'lucide-react';
+import {
+  AlertCircle, Ban, Check, ChevronRight, FolderPlus, LoaderCircle, Pencil, Plus, RotateCcw, Search,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { expertRulesApi, requestJson } from './api';
+import { GroupDeleteDialog, GroupDialog, GroupedList, GroupSelect, useGroupWorkspace } from './ConceptGroups';
 import { CreationOrigin } from './CreationOrigin';
 import { completeConceptCreation, takeConceptRequest } from './creationRequest';
 import type { ConceptRequest } from './creationRequest';
@@ -14,7 +17,7 @@ import { formatTime } from './MetricDefinitionPanel';
 import { ReviewDecisionDialog } from './ReviewDecisionDialog';
 import type { ReviewDecisionText } from './ReviewDecisionDialog';
 import type {
-  ExpertRule, ExpertRuleAuditEntry, ExpertRuleDatasetOption, ExpertRuleList, ExpertRuleState,
+  ConceptGroup, ExpertRule, ExpertRuleAuditEntry, ExpertRuleDatasetOption, ExpertRuleList, ExpertRuleState,
 } from './types';
 
 const STATE_LABELS: Record<ExpertRuleState, string> = {
@@ -31,6 +34,7 @@ const AUDIT_LABELS: Record<ExpertRuleAuditEntry['action'], string> = {
   updated: 'sửa nội dung',
   approved: 'duyệt',
   revoked: 'thu hồi',
+  moved: 'chuyển nhóm',
 };
 
 const AUDIT_CLASSES: Record<ExpertRuleAuditEntry['action'], string> = {
@@ -38,6 +42,7 @@ const AUDIT_CLASSES: Record<ExpertRuleAuditEntry['action'], string> = {
   updated: 'is-candidate',
   approved: 'is-approve',
   revoked: 'is-revoke',
+  moved: 'is-definition',
 };
 
 type RuleDecision = 'approve' | 'revoke';
@@ -108,8 +113,9 @@ function RuleHistory({ rule, revision }: { rule: ExpertRule; revision: number })
         <p className="sl-metric-muted"><LoaderCircle className="sl-spin" /> Đang tải lịch sử…</p>
       ) : (
           <ol className="sl-metrics-history">
-            {entries.map(entry => (
-              <li key={`${entry.lifecycle_version}-${entry.action}`} className={AUDIT_CLASSES[entry.action]}>
+            {entries.map((entry, index) => (
+              // A move keeps the lifecycle version, so several entries can share version and action.
+              <li key={`${entry.lifecycle_version}-${entry.action}-${index}`} className={AUDIT_CLASSES[entry.action]}>
                 <div>
                   <strong>{entry.actor_name ?? 'Người dùng đã xoá'}</strong> {AUDIT_LABELS[entry.action]}
                   {entry.action === 'created' || entry.action === 'updated' ? ` (bản ${entry.revision})` : ''}
@@ -124,12 +130,26 @@ function RuleHistory({ rule, revision }: { rule: ExpertRule; revision: number })
   );
 }
 
-function RuleDetail({ rule, historyRevision }: { rule: ExpertRule; historyRevision: number }) {
+function RuleDetail({ rule, groups, historyRevision, moving, onMove }: {
+  rule: ExpertRule;
+  groups: ConceptGroup[];
+  historyRevision: number;
+  moving: boolean;
+  onMove: (groupId: number | null) => void;
+}) {
   const columnName = (columnId: number) => rule.column_names[String(columnId)] ?? `#${columnId}`;
   const links = [...rule.glossary_terms.map(term => ({ ...term, kind: 'Thuật ngữ' })),
     ...rule.metrics.map(metric => ({ ...metric, kind: 'Metric' }))];
   return (
     <div className="sl-metrics-definition" role="tabpanel">
+      <dl className="sl-metrics-facts">
+        <div>
+          <dt>Nhóm</dt>
+          <dd>
+            <GroupSelect groups={groups} groupId={rule.group?.id ?? null} disabled={moving} inline onChange={onMove} />
+          </dd>
+        </div>
+      </dl>
       <section className="sl-metrics-section">
         <h4>Khi nào áp dụng</h4>
         <ul className="sl-rule-conditions">
@@ -194,7 +214,7 @@ export function ExpertRules() {
   // Set when "Xử lý câu hỏi" sent the administrator here to cover a concept users defined for themselves.
   const [creation, setCreation] = useState<ConceptRequest | null>(() => takeConceptRequest('expert_rule'));
   const [ruleList, setRuleList] = useState<ExpertRuleList>(
-    { rules: [], current_user_id: null, require_second_reviewer: false },
+    { rules: [], groups: [], current_user_id: null, require_second_reviewer: false },
   );
   const [datasets, setDatasets] = useState<ExpertRuleDatasetOption[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -225,6 +245,10 @@ export function ExpertRules() {
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  const groupWorkspace = useGroupWorkspace(
+    { groups: expertRulesApi.groups, group: expertRulesApi.group }, load, setError,
+  );
+  const [moving, setMoving] = useState(false);
 
   const stateCounts = useMemo(() => {
     const counts = new Map<ExpertRuleState, number>();
@@ -237,15 +261,7 @@ export function ExpertRules() {
       (stateFilter === 'all' || rule.state === stateFilter) && (!query || rule.name.toLowerCase().includes(query))
     ));
   }, [ruleList, stateFilter, searchText]);
-  const ruleGroups = useMemo(() => {
-    const groups = new Map<string, ExpertRule[]>();
-    visibleRules.forEach(rule => {
-      const datasetName = rule.dataset_name ?? 'Dataset đã xoá';
-      groups.set(datasetName, [...(groups.get(datasetName) ?? []), rule]);
-    });
-    return [...groups.entries()];
-  }, [visibleRules]);
-
+  const filtering = stateFilter !== 'all' || searchText.trim() !== '';
   const selectedRule = ruleList.rules.find(rule => rule.id === selectedId) ?? visibleRules[0] ?? null;
   const stateItems = [
     { value: 'all', label: `Mọi trạng thái (${ruleList.rules.length})` },
@@ -282,6 +298,20 @@ export function ExpertRules() {
       setError(expertRuleErrorMessage(failure instanceof Error ? failure.message : 'Thao tác không thành công.'));
     } finally {
       setDeciding(false);
+    }
+  };
+
+  // A group only organizes rules, so a move takes effect at once and the rule keeps its approval.
+  const moveRule = async (rule: ExpertRule, groupId: number | null) => {
+    setMoving(true);
+    setError('');
+    try {
+      await requestJson(expertRulesApi.move(rule.id), 'PUT', { group_id: groupId });
+      await refreshAfterChange(rule.id);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Không chuyển được rule sang nhóm khác.');
+    } finally {
+      setMoving(false);
     }
   };
 
@@ -324,32 +354,42 @@ export function ExpertRules() {
           <Button variant="outline" disabled={datasets.length === 0} onClick={() => startNew()}>
             <Plus data-icon="inline-start" /> Tạo rule
           </Button>
+          <Button variant="outline" onClick={() => groupWorkspace.startEditing('new')}>
+            <FolderPlus data-icon="inline-start" /> Tạo nhóm
+          </Button>
         </div>
         <div className="sl-metrics-list">
           {loading && ruleList.rules.length === 0 ? (
             <p className="sl-metric-muted"><LoaderCircle className="sl-spin" /> Đang tải rule…</p>
-          ) : ruleGroups.length === 0 ? (
+          ) : visibleRules.length === 0 && (filtering || ruleList.groups.length === 0) ? (
             <p className="sl-metric-muted">
               {ruleList.rules.length === 0
                 ? 'Chưa có rule nào. Bấm "Tạo rule" để bắt đầu.'
                 : 'Không có rule nào khớp bộ lọc.'}
             </p>
-          ) : ruleGroups.map(([datasetName, rules]) => (
-            <div key={datasetName} className="sl-metrics-group">
-              <h4 title={datasetName}>{datasetName}</h4>
-              {rules.map(rule => (
+          ) : (
+            <GroupedList
+              noun="rule"
+              groups={ruleList.groups}
+              items={visibleRules}
+              groupIdOf={rule => rule.group?.id ?? null}
+              filtered={filtering}
+              onEditGroup={group => groupWorkspace.startEditing(group)}
+              onDeleteGroup={groupWorkspace.setDeleting}
+              renderItem={rule => (
                 <button
                   key={rule.id}
                   type="button"
                   className={`sl-metrics-item${isSelected(rule) ? ' is-selected' : ''}`}
+                  title={rule.dataset_name ?? 'Dataset đã xoá'}
                   onClick={() => { setSelectedId(rule.id); setEditing(null); }}
                 >
                   <span className={`sl-metrics-dot is-${rule.state}`} title={STATE_LABELS[rule.state]} />
                   <span className="sl-metrics-item-name">{rule.name}</span>
                 </button>
-              ))}
-            </div>
-          ))}
+              )}
+            />
+          )}
         </div>
       </aside>
       <section className="sl-metrics-detail" aria-label="Chi tiết rule">
@@ -374,6 +414,7 @@ export function ExpertRules() {
               rule={editorRule}
               draft={creation && !editorRule ? draftFromRequest(creation) : null}
               datasets={datasets}
+              groups={ruleList.groups}
               onCancel={closeEditor}
               onSaved={ruleId => void saveFromEditor(ruleId)}
             />
@@ -418,7 +459,14 @@ export function ExpertRules() {
                 ) : null}
               </div>
             </header>
-            <RuleDetail key={selectedRule.id} rule={selectedRule} historyRevision={historyRevision} />
+            <RuleDetail
+              key={selectedRule.id}
+              rule={selectedRule}
+              groups={ruleList.groups}
+              historyRevision={historyRevision}
+              moving={moving}
+              onMove={groupId => void moveRule(selectedRule, groupId)}
+            />
           </>
         )}
       </section>
@@ -429,6 +477,22 @@ export function ExpertRules() {
         busy={deciding}
         onConfirm={reason => { if (openDecision) void decide(openDecision, reason); }}
         onClose={() => setOpenDecision(null)}
+      />
+      <GroupDialog
+        noun="rule"
+        editing={groupWorkspace.editing}
+        busy={groupWorkspace.busy}
+        error={groupWorkspace.dialogError ? expertRuleErrorMessage(groupWorkspace.dialogError) : ''}
+        onSave={values => void groupWorkspace.save(values)}
+        onClose={() => groupWorkspace.startEditing(null)}
+      />
+      <GroupDeleteDialog
+        noun="rule"
+        group={groupWorkspace.deleting}
+        memberCount={ruleList.rules.filter(rule => rule.group?.id === groupWorkspace.deleting?.id).length}
+        busy={groupWorkspace.busy}
+        onConfirm={() => void groupWorkspace.remove()}
+        onClose={() => groupWorkspace.setDeleting(null)}
       />
     </div>
   );

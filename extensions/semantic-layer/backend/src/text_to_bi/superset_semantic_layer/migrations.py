@@ -16,8 +16,22 @@ from .modules.business_model.models import (
 )
 from .modules.data_dictionary.models import ColumnDictionary, DatasetDictionary, DatasetGrain
 from .modules.data_dictionary.services.column_semantics import default_semantic_role
-from .modules.expert_rules.models import ExpertRule, ExpertRuleAuditEvent, ExpertRuleLink, ExpertRuleRevision
-from .modules.glossary.models import GlossaryTerm, GlossaryTermAuditEvent, GlossaryTermLink, GlossaryTermRevision
+from .modules.expert_rules.models import (
+    ExpertRule,
+    ExpertRuleAuditEvent,
+    ExpertRuleGroup,
+    ExpertRuleLink,
+    ExpertRuleRevision,
+)
+from .modules.expert_rules.models.expert_rule import AUDIT_EVENT_TYPES as EXPERT_RULE_AUDIT_EVENT_TYPES
+from .modules.glossary.models import (
+    GlossaryTerm,
+    GlossaryTermAuditEvent,
+    GlossaryTermGroup,
+    GlossaryTermLink,
+    GlossaryTermRevision,
+)
+from .modules.glossary.models.glossary_term import AUDIT_EVENT_TYPES as GLOSSARY_AUDIT_EVENT_TYPES
 from .modules.semantic_query.models import MetricContract, MetricContractEvent, MetricDefinition, RelationshipContract
 
 logger = logging.getLogger(__name__)
@@ -117,11 +131,13 @@ def _migrate_dictionary_tables():
     MetricDefinition.__table__.create(bind=db.engine, checkfirst=True)
     RelationshipContract.__table__.create(bind=db.engine, checkfirst=True)
     # Glossary parent tables must exist before immutable revisions, links, and audit evidence.
+    GlossaryTermGroup.__table__.create(bind=db.engine, checkfirst=True)
     GlossaryTerm.__table__.create(bind=db.engine, checkfirst=True)
     GlossaryTermRevision.__table__.create(bind=db.engine, checkfirst=True)
     GlossaryTermLink.__table__.create(bind=db.engine, checkfirst=True)
     GlossaryTermAuditEvent.__table__.create(bind=db.engine, checkfirst=True)
     # Expert rule routes never issue DDL, so this migration is their only table bootstrap.
+    ExpertRuleGroup.__table__.create(bind=db.engine, checkfirst=True)
     ExpertRule.__table__.create(bind=db.engine, checkfirst=True)
     ExpertRuleRevision.__table__.create(bind=db.engine, checkfirst=True)
     ExpertRuleLink.__table__.create(bind=db.engine, checkfirst=True)
@@ -170,6 +186,8 @@ def _migrate_dictionary_tables():
             connection.execute(
                 text("CREATE INDEX ix_text_to_bi_metric_contract_revoker_id ON text_to_bi_metric_contract (revoker_id)")
             )
+
+    _add_group_columns(postgres)
 
     with db.engine.begin() as connection:
         definition_columns = {
@@ -390,3 +408,42 @@ def _migrate_dictionary_tables():
                 connection.execute(
                     text(f"ALTER INDEX {old_index_name} RENAME TO ix_text_to_bi_column_dictionary_dataset_id")
                 )
+
+
+def _add_group_columns(postgres: bool) -> None:
+    """Give terms and rules created before groups existed a group column, and let their audit trails record moves."""
+    with db.engine.begin() as connection:
+        for member, group, audit_event, event_types, check_name in (
+            (
+                GlossaryTerm,
+                GlossaryTermGroup,
+                GlossaryTermAuditEvent,
+                GLOSSARY_AUDIT_EVENT_TYPES,
+                "ck_text_to_bi_glossary_audit_event",
+            ),
+            (
+                ExpertRule,
+                ExpertRuleGroup,
+                ExpertRuleAuditEvent,
+                EXPERT_RULE_AUDIT_EVENT_TYPES,
+                "ck_text_to_bi_expert_rule_audit",
+            ),
+        ):
+            table = member.__tablename__
+            if "group_id" not in {column["name"] for column in inspect(connection).get_columns(table)}:
+                reference = f" REFERENCES {group.__tablename__} (id) ON DELETE SET NULL" if postgres else ""
+                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN group_id INTEGER{reference}"))
+                connection.execute(text(f"CREATE INDEX ix_{table}_group_id ON {table} (group_id)"))
+            if not postgres:
+                continue
+            # Tables created before moves were audited only accept the four lifecycle events.
+            audit_table = audit_event.__tablename__
+            preparer = connection.dialect.identifier_preparer
+            for constraint in inspect(connection).get_check_constraints(audit_table):
+                if "event_type" in constraint["sqltext"] and "'moved'" not in constraint["sqltext"]:
+                    connection.execute(
+                        text(f"ALTER TABLE {audit_table} DROP CONSTRAINT {preparer.quote(constraint['name'])}")
+                    )
+                    connection.execute(
+                        text(f"ALTER TABLE {audit_table} ADD CONSTRAINT {check_name} CHECK ({event_types})")
+                    )

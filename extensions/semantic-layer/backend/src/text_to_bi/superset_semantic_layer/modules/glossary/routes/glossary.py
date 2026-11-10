@@ -13,11 +13,12 @@ from ...superset.services.datasets import datasets_by_name, get_dataset, is_inte
 from ...superset.services.users import user_names
 from ..dependencies import (
     glossary_term_audit_event_repository,
+    glossary_term_group_repository,
     glossary_term_repository,
     glossary_term_revision_repository,
 )
 from ..exceptions import GlossaryTermNotFoundError
-from ..models import GlossaryTerm, GlossaryTermLink, GlossaryTermRevision
+from ..models import GlossaryTerm, GlossaryTermGroup, GlossaryTermLink, GlossaryTermRevision
 from ..services.discovery import (
     discoverable_glossary_terms,
     glossary_link_target,
@@ -25,7 +26,8 @@ from ..services.discovery import (
     glossary_metric_approved,
 )
 from ..services.glossary import approve_revision, create_draft, revision_author_id, revoke_revision, update_draft
-from ..services.validation import expected_revision_of, glossary_link_fingerprint, review_reason
+from ..services.group import create_group, delete_group, group_reference, move_term, update_group
+from ..services.validation import expected_revision_of, glossary_link_fingerprint, group_id_of, review_reason
 
 
 class GlossaryRoutes:
@@ -63,9 +65,14 @@ class GlossaryRoutes:
             "id": term.id,
             "canonical_name": term.canonical_name,
             "steward_id": term.steward_id,
+            "group": group_reference(term.group),
             "current_revision": current,
             "revisions": serialized,
         }
+
+    @staticmethod
+    def _glossary_group(group: GlossaryTermGroup) -> dict[str, Any]:
+        return {"id": group.id, "name": group.name, "description": group.description}
 
     def _glossary_term_by_id(self, term_id: int) -> GlossaryTerm | None:
         return glossary_term_repository().get(term_id)
@@ -135,6 +142,7 @@ class GlossaryRoutes:
         return self.response(
             200,
             terms=terms,
+            groups=[self._glossary_group(group) for group in glossary_term_group_repository().by_name()],
             users=self._active_users(),
             current_user_id=current_user.id,
             require_second_reviewer=second_reviewer_required(),
@@ -246,6 +254,64 @@ class GlossaryRoutes:
         revision = revoke_revision(term_id, expected_revision_of(payload), current_user.id, review_reason(payload))
         db.session.commit()
         return self.response(200, term=self._glossary_term(revision.term, [revision]))
+
+    @expose("/glossary/<int:term_id>/group", methods=("PUT",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @csrf_protected
+    @rollback_on_error
+    @handle_errors
+    def move_glossary_term(self, term_id: int):
+        """Move a term into a group, or out of every group with a null `group_id`; no review is needed."""
+        require_admin()
+        ensure_dictionary_tables()
+        term = move_term(term_id, group_id_of(request.get_json(silent=True)), current_user.id)
+        db.session.commit()
+        return self.response(200, term_id=term.id, group=group_reference(term.group))
+
+    @expose("/glossary/groups", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @csrf_protected
+    @rollback_on_error
+    @handle_errors
+    def create_glossary_group(self):
+        require_admin()
+        ensure_dictionary_tables()
+        group = create_group(request.get_json(silent=True))
+        db.session.commit()
+        return self.response(201, group=self._glossary_group(group))
+
+    @expose("/glossary/groups/<int:group_id>", methods=("PUT",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @csrf_protected
+    @rollback_on_error
+    @handle_errors
+    def update_glossary_group(self, group_id: int):
+        require_admin()
+        ensure_dictionary_tables()
+        group = update_group(group_id, request.get_json(silent=True))
+        db.session.commit()
+        return self.response(200, group=self._glossary_group(group))
+
+    @expose("/glossary/groups/<int:group_id>", methods=("DELETE",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @csrf_protected
+    @rollback_on_error
+    @handle_errors
+    def delete_glossary_group(self, group_id: int):
+        """Delete a group; its terms become ungrouped and keep their approval."""
+        require_admin()
+        ensure_dictionary_tables()
+        moved_term_ids = delete_group(group_id, current_user.id)
+        db.session.commit()
+        return self.response(200, moved_term_ids=moved_term_ids)
 
     @expose("/glossary/<int:term_id>/audit", methods=("GET",))
     @protect()

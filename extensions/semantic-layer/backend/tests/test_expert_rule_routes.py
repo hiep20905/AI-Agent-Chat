@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 import text_to_bi.superset_semantic_layer.common.base_repo  # noqa: F401
 from text_to_bi.superset_semantic_layer.modules.expert_rules.exceptions import (
     ExpertRuleConflictError,
+    ExpertRuleGroupNotFoundError,
     ExpertRuleSelfApprovalError,
 )
 
@@ -36,6 +37,10 @@ ENDPOINTS = {
     "discover": ("/expert-rules/discover", "GET"),
     "list_rules": ("/expert-rules", "GET"),
     "rule_options": ("/expert-rules/options", "GET"),
+    "move": ("/expert-rules/<int:rule_id>/group", "PUT"),
+    "create_group": ("/expert-rules/groups", "POST"),
+    "update_group": ("/expert-rules/groups/<int:group_id>", "PUT"),
+    "delete_group": ("/expert-rules/groups/<int:group_id>", "DELETE"),
 }
 
 
@@ -160,6 +165,7 @@ def _load_route(monkeypatch, *, csrf_error=False, allowed_datasets=()):
     models.ExpertRuleRevision = type("ExpertRuleRevision", (), {})
     models.ExpertRuleLink = type("ExpertRuleLink", (), {})
     models.ExpertRuleAuditEvent = type("ExpertRuleAuditEvent", (), {"id": object()})
+    models.ExpertRuleGroup = type("ExpertRuleGroup", (), {"name": object()})
     dictionary = types.ModuleType("text_to_bi.superset_semantic_layer.modules.data_dictionary.models")
     dictionary.ColumnDictionary = type("ColumnDictionary", (), {})
     dictionary.DatasetDictionary = type("DatasetDictionary", (), {})
@@ -169,6 +175,7 @@ def _load_route(monkeypatch, *, csrf_error=False, allowed_datasets=()):
     glossary.GlossaryTerm = type("GlossaryTerm", (), {})
     glossary.GlossaryTermRevision = type("GlossaryTermRevision", (), {})
     glossary.GlossaryTermAuditEvent = type("GlossaryTermAuditEvent", (), {})
+    glossary.GlossaryTermGroup = type("GlossaryTermGroup", (), {})
     metric = types.ModuleType("text_to_bi.superset_semantic_layer.modules.semantic_query.models")
     for name in ("MetricContract", "MetricContractEvent", "MetricDefinition", "RelationshipContract"):
         setattr(metric, name, type(name, (), {}))
@@ -278,7 +285,10 @@ def test_discovery_keeps_rule_when_only_unrelated_glossary_link_is_denied_and_om
         exceptions=[],
         examples=[],
     )
-    rules = {1: SimpleNamespace(dataset_id=7), 2: SimpleNamespace(dataset_id=8)}
+    rules = {
+        1: SimpleNamespace(dataset_id=7, group=SimpleNamespace(id=5, name="Lọc bản ghi")),
+        2: SimpleNamespace(dataset_id=8, group=None),
+    }
     links = {
         1: [
             SimpleNamespace(kind="dataset", target_id=7, dataset_id=7, fingerprint="dataset"),
@@ -316,6 +326,8 @@ def test_discovery_keeps_rule_when_only_unrelated_glossary_link_is_denied_and_om
         [3],
         [],
     )
+    # Rules of one group are alike, so a consumer can read them together.
+    assert body["rules"][0]["group"] == {"id": 5, "name": "Lọc bản ghi"}
 
 
 def test_serialized_rule_and_audit_expose_lifecycle_version(monkeypatch):
@@ -443,3 +455,28 @@ def test_a_rule_takes_its_metrics_from_its_glossary_terms(monkeypatch):
 
     assert api._with_term_metrics(payload) == {**payload, "metric_ids": [17, 20]}
     assert api._with_term_metrics({"dataset_id": 12}) == {"dataset_id": 12}
+
+
+def test_group_routes_are_admin_only_commit_once_and_answer_a_missing_group_with_404(monkeypatch):
+    app = Flask(__name__)
+    route, user, session = _load_route(monkeypatch)
+    api = route.ExpertRuleAPI()
+    received = {}
+
+    def delete_rule_group(_session, group_id, actor_id):
+        received.update(group_id=group_id, actor_id=actor_id)
+        return [3, 4]
+
+    route.delete_rule_group = delete_rule_group
+    with app.test_request_context("/", method="DELETE"):
+        assert api.delete_group(5) == (200, {"moved_rule_ids": [3, 4]})
+    assert received == {"group_id": 5, "actor_id": 42} and session.commit_calls == 1
+
+    route.move_rule = lambda *_: (_ for _ in ()).throw(ExpertRuleGroupNotFoundError())
+    with app.test_request_context("/", method="PUT", json={"group_id": 404}):
+        assert api.move(1) == (404, {"message": "Không tìm thấy nhóm rule."})
+    assert session.commit_calls == 1 and session.rollback_calls == 1
+
+    user.roles = []
+    with app.test_request_context("/", method="POST", json={"name": "Lọc bản ghi"}):
+        assert api.create_group()[0] == 403

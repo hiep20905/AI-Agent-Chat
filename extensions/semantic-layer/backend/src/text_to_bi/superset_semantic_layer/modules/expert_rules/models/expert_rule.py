@@ -7,11 +7,29 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
 from ....common.base_model import AuditedModel, BaseModel
+
+# What an audit event records; `moved` is a change of group, which is not a revision of the rule.
+AUDIT_EVENT_TYPES = "event_type IN ('created', 'updated', 'approved', 'revoked', 'moved')"
+
+
+class ExpertRuleGroup(AuditedModel):
+    """Similar rules, kept together for administrators and the AI Agent."""
+
+    __table_args__ = (
+        UniqueConstraint("normalized_name", name="uq_text_to_bi_expert_rule_group_name"),
+        {"extend_existing": True},
+    )
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    normalized_name = Column(String(255), nullable=False, index=True)
+    description = Column(Text, nullable=True)
 
 
 class ExpertRule(AuditedModel):
@@ -23,6 +41,11 @@ class ExpertRule(AuditedModel):
     id = Column(Integer, primary_key=True)
     normalized_name = Column(String(255), nullable=False, index=True)
     dataset_id = Column(Integer, ForeignKey("tables.id", ondelete="CASCADE"), nullable=False, index=True)
+    # The group belongs to the rule, not to a revision: moving a rule needs no review and keeps it discoverable.
+    group_id = Column(
+        Integer, ForeignKey("text_to_bi_expert_rule_group.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    group = relationship("ExpertRuleGroup")
 
 
 
@@ -75,9 +98,7 @@ class ExpertRuleLink(BaseModel):
 
 class ExpertRuleAuditEvent(BaseModel):
     __table_args__ = (
-        CheckConstraint(
-            "event_type IN ('created', 'updated', 'approved', 'revoked')", name="ck_text_to_bi_expert_rule_audit"
-        ),
+        CheckConstraint(AUDIT_EVENT_TYPES, name="ck_text_to_bi_expert_rule_audit"),
         {"extend_existing": True},
     )
 

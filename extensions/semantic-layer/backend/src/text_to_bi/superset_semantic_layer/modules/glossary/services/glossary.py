@@ -19,7 +19,8 @@ from ..exceptions import (
 )
 from ..models import GlossaryTerm, GlossaryTermAuditEvent, GlossaryTermLink, GlossaryTermRevision
 from .discovery import glossary_metric_approved
-from .validation import content_hash, normalize_glossary_payload, validated_links
+from .group import place_term, require_group
+from .validation import content_hash, group_id_of, normalize_glossary_payload, validated_links
 
 TERM_CHANGED = "The glossary term changed; refresh and retry."
 NAME_TAKEN = "A glossary term with this canonical name already exists."
@@ -92,6 +93,9 @@ def create_draft(payload: Any, actor_id: int) -> GlossaryTermRevision:
         normalized_name=values["normalized_name"],
         steward_id=values["steward_id"],
     )
+    group_id = group_id_of(payload)
+    if group_id is not None:
+        term.group = require_group(group_id)
     try:
         term_repository.add(term)
     except IntegrityError as error:
@@ -105,16 +109,20 @@ def update_draft(term_id: int, payload: Any, expected_revision: int, actor_id: i
     """Save an edit as the term's next revision, a draft.
 
     The approved revision keeps answering the AI Agent until the draft is approved, so a correction never hides the
-    term in the meantime.
+    term in the meantime. A `group_id` in the payload moves the term at once, outside the draft.
     """
     current = _locked_current(term_id, expected_revision)
     values = _checked_content(payload)
     if values["normalized_name"] != current.term.normalized_name:
         raise GlossaryValidationError("The canonical name cannot be changed after creation.")
+    group_id = group_id_of(payload)
+    group = None if group_id is None else require_group(group_id)
     current.term.steward_id = values["steward_id"]
     current.is_current = False
     revision = _add_revision(term_id, current.revision_number + 1, values)
     _record(revision, "updated", actor_id)
+    if "group_id" in payload:
+        place_term(current.term, group, actor_id)
     return revision
 
 

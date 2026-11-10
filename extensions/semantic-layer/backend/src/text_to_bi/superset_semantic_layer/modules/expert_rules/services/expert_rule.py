@@ -379,6 +379,11 @@ def _lock(session: Any, revision: Any) -> Any:
     return current
 
 
+def _without_group(payload: Any) -> Any:
+    """The rule's content: its group is kept on the rule itself, outside the reviewed and hashed revision."""
+    return {key: value for key, value in payload.items() if key != "group_id"} if isinstance(payload, dict) else payload
+
+
 def _links(values: dict[str, Any], fingerprint: Callable[[str, int, int], str]) -> list[dict[str, Any]]:
     refs = [
         ("dataset", values["dataset_id"]),
@@ -411,13 +416,17 @@ def create_draft(
     from ..repositories.expert_rule_audit_event import ExpertRuleAuditEventRepository
     from ..repositories.expert_rule_link import ExpertRuleLinkRepository
     from ..repositories.expert_rule_revision import ExpertRuleRevisionRepository
+    from .expert_rule_group import require_rule_group, rule_group_id
 
-    values = normalize_rule_payload(payload, column_resolver)
+    group_id = rule_group_id(payload)
+    values = normalize_rule_payload(_without_group(payload), column_resolver)
     validate_semantic_links(values, dataset_resolver, glossary_resolver, metric_resolver)
     rule_repository = ExpertRuleRepository(session)
     if rule_repository.by_normalized_name(values["normalized_name"]) is not None:
         raise ExpertRuleConflictError("An expert rule with this name already exists.")
     rule = ExpertRule(normalized_name=values["normalized_name"], dataset_id=values["dataset_id"])
+    if group_id is not None:
+        rule.group = require_rule_group(session, group_id)
     rule_repository.add(rule)
     revision = ExpertRuleRevision(
         rule_id=rule.id,
@@ -466,6 +475,7 @@ def update_draft(
     from ..repositories.expert_rule_audit_event import ExpertRuleAuditEventRepository
     from ..repositories.expert_rule_link import ExpertRuleLinkRepository
     from ..repositories.expert_rule_revision import ExpertRuleRevisionRepository
+    from .expert_rule_group import place_rule, require_rule_group, rule_group_id
 
     revision = _lock(session, revision)
     if revision.lifecycle_version != expected_revision:
@@ -473,7 +483,11 @@ def update_draft(
     # A revoked rule stays current so its author can correct it and send it for review again.
     if revision.status not in {"draft", "approved", "revoked"}:
         raise ExpertRuleValidationError("Only a current expert rule can be updated.")
-    values = normalize_rule_payload(payload, column_resolver)
+    # A group_id moves the rule at once, outside the draft that waits for review.
+    group_given = isinstance(payload, dict) and "group_id" in payload
+    group_id = rule_group_id(payload)
+    group = None if group_id is None else require_rule_group(session, group_id)
+    values = normalize_rule_payload(_without_group(payload), column_resolver)
     validate_semantic_links(values, dataset_resolver, glossary_resolver, metric_resolver)
     # Do not rely on an unloaded ORM relationship: ``_lock`` deliberately
     # resolved the authoritative rule under a row lock for this transaction.
@@ -511,6 +525,8 @@ def update_draft(
         ),
         flush=False,
     )
+    if group_given:
+        place_rule(session, rule, group, actor_id)
     return next_revision
 
 

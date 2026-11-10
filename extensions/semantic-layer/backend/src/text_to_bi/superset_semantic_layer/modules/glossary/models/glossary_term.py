@@ -14,6 +14,23 @@ from sqlalchemy.orm import relationship
 
 from ....common.base_model import AuditedModel, BaseModel
 
+# What an audit event records; `moved` is a change of group, which is not a revision of the term.
+AUDIT_EVENT_TYPES = "event_type IN ('created', 'updated', 'approved', 'revoked', 'moved')"
+
+
+class GlossaryTermGroup(AuditedModel):
+    """Terms with the same or a close meaning, kept together for administrators and the AI Agent."""
+
+    __table_args__ = (
+        UniqueConstraint("normalized_name", name="uq_text_to_bi_glossary_term_group_name"),
+        {"extend_existing": True},
+    )
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    normalized_name = Column(String(255), nullable=False, index=True)
+    description = Column(Text, nullable=True)
+
 
 class GlossaryTerm(AuditedModel):
     """Stable identity for a governed business term."""
@@ -27,6 +44,11 @@ class GlossaryTerm(AuditedModel):
     canonical_name = Column(String(255), nullable=False)
     normalized_name = Column(String(255), nullable=False, index=True)
     steward_id = Column(Integer, ForeignKey("ab_user.id", ondelete="SET NULL"), nullable=True, index=True)
+    # The group belongs to the term, not to a revision: moving a term needs no review and keeps it serving.
+    group_id = Column(
+        Integer, ForeignKey("text_to_bi_glossary_term_group.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    group = relationship("GlossaryTermGroup")
 
 
 
@@ -81,9 +103,7 @@ class GlossaryTermAuditEvent(BaseModel):
     """Append-only lifecycle evidence. Application code creates, never mutates, these rows."""
 
     __table_args__ = (
-        CheckConstraint(
-            "event_type IN ('created', 'updated', 'approved', 'revoked')", name="ck_text_to_bi_glossary_audit_event"
-        ),
+        CheckConstraint(AUDIT_EVENT_TYPES, name="ck_text_to_bi_glossary_audit_event"),
         {"extend_existing": True},
     )
 

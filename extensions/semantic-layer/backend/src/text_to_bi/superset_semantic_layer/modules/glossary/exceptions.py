@@ -17,3 +17,7 @@ class GlossarySelfApprovalError(SelfApprovalError):
 
 class GlossaryTermNotFoundError(NotFoundError):
     message = "Glossary term not found."
+
+
+class GlossaryTermGroupNotFoundError(NotFoundError):
+    message = "Không tìm thấy nhóm thuật ngữ."

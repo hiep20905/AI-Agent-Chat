@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Ban, Check, ChevronRight, LoaderCircle, Pencil, Plus, RotateCcw, Search } from 'lucide-react';
+import {
+  AlertCircle, Ban, Check, ChevronRight, FolderPlus, LoaderCircle, Pencil, Plus, RotateCcw, Search,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { requestJson, semanticLayerApi } from './api';
+import { GroupDeleteDialog, GroupDialog, GroupedList, GroupSelect, useGroupWorkspace } from './ConceptGroups';
 import { CreationOrigin } from './CreationOrigin';
 import { completeConceptCreation, takeConceptRequest } from './creationRequest';
 import type { ConceptRequest } from './creationRequest';
@@ -13,7 +16,8 @@ import { formatTime } from './MetricDefinitionPanel';
 import { ReviewDecisionDialog } from './ReviewDecisionDialog';
 import type { ReviewDecisionText } from './ReviewDecisionDialog';
 import type {
-  GlossaryAuditEvent, GlossaryDatasetOption, GlossaryLink, GlossaryReviewTerm, GlossaryState, GlossaryTermList,
+  ConceptGroup, GlossaryAuditEvent, GlossaryDatasetOption, GlossaryLink, GlossaryReviewTerm, GlossaryState,
+  GlossaryTermList,
 } from './types';
 
 const STATE_LABELS: Record<GlossaryState, string> = {
@@ -30,6 +34,7 @@ const AUDIT_LABELS: Record<GlossaryAuditEvent['action'], string> = {
   updated: 'sửa nội dung',
   approved: 'duyệt',
   revoked: 'thu hồi',
+  moved: 'chuyển nhóm',
 };
 
 const AUDIT_CLASSES: Record<GlossaryAuditEvent['action'], string> = {
@@ -37,6 +42,7 @@ const AUDIT_CLASSES: Record<GlossaryAuditEvent['action'], string> = {
   updated: 'is-candidate',
   approved: 'is-approve',
   revoked: 'is-revoke',
+  moved: 'is-definition',
 };
 
 type TermDecision = 'approve' | 'revoke';
@@ -128,7 +134,13 @@ function TermHistory({ term, revision }: { term: GlossaryReviewTerm; revision: n
   );
 }
 
-function TermDetail({ term, historyRevision }: { term: GlossaryReviewTerm; historyRevision: number }) {
+function TermDetail({ term, groups, historyRevision, moving, onMove }: {
+  term: GlossaryReviewTerm;
+  groups: ConceptGroup[];
+  historyRevision: number;
+  moving: boolean;
+  onMove: (groupId: number | null) => void;
+}) {
   const revision = term.current_revision;
   const servingOlderRevision = term.state === 'draft' && term.serving_revision_number !== null;
   return (
@@ -140,6 +152,12 @@ function TermDetail({ term, historyRevision }: { term: GlossaryReviewTerm; histo
       ) : null}
       <dl className="sl-metrics-facts">
         <div><dt>Người phụ trách</dt><dd>{term.steward_name ?? 'Chưa chỉ định'}</dd></div>
+        <div>
+          <dt>Nhóm</dt>
+          <dd>
+            <GroupSelect groups={groups} groupId={term.group?.id ?? null} disabled={moving} inline onChange={onMove} />
+          </dd>
+        </div>
       </dl>
       <section className="sl-metrics-section">
         <h4>Định nghĩa</h4>
@@ -178,7 +196,7 @@ export function Glossary() {
   // Set when "Xử lý câu hỏi" sent the administrator here to cover a concept users defined for themselves.
   const [creation, setCreation] = useState<ConceptRequest | null>(() => takeConceptRequest('glossary'));
   const [termList, setTermList] = useState<GlossaryTermList>(
-    { terms: [], users: [], current_user_id: null, require_second_reviewer: false },
+    { terms: [], groups: [], users: [], current_user_id: null, require_second_reviewer: false },
   );
   const [datasets, setDatasets] = useState<GlossaryDatasetOption[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -209,6 +227,10 @@ export function Glossary() {
     }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  const groupWorkspace = useGroupWorkspace(
+    { groups: semanticLayerApi.glossaryGroups, group: semanticLayerApi.glossaryGroup }, load, setError,
+  );
+  const [moving, setMoving] = useState(false);
 
   const stateCounts = useMemo(() => {
     const counts = new Map<GlossaryState, number>();
@@ -223,6 +245,7 @@ export function Glossary() {
     return termList.terms.filter(term => stateMatches(term) && (!query || matches(term)));
   }, [termList, stateFilter, searchText]);
 
+  const filtering = stateFilter !== 'all' || searchText.trim() !== '';
   const selectedTerm = termList.terms.find(term => term.id === selectedId) ?? visibleTerms[0] ?? null;
   const stateItems = [
     { value: 'all', label: `Mọi trạng thái (${termList.terms.length})` },
@@ -261,6 +284,20 @@ export function Glossary() {
       setError(glossaryErrorMessage(failure instanceof Error ? failure.message : 'Thao tác không thành công.'));
     } finally {
       setDeciding(false);
+    }
+  };
+
+  // A group only organizes terms, so a move takes effect at once and the term keeps its approval.
+  const moveTerm = async (term: GlossaryReviewTerm, groupId: number | null) => {
+    setMoving(true);
+    setError('');
+    try {
+      await requestJson(semanticLayerApi.glossaryMove(term.id), 'PUT', { group_id: groupId });
+      await refreshAfterChange(term.id);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Không chuyển được thuật ngữ sang nhóm khác.');
+    } finally {
+      setMoving(false);
     }
   };
 
@@ -305,27 +342,41 @@ export function Glossary() {
           <Button variant="outline" disabled={datasets.length === 0} onClick={() => startNew()}>
             <Plus data-icon="inline-start" /> Tạo thuật ngữ
           </Button>
+          <Button variant="outline" onClick={() => groupWorkspace.startEditing('new')}>
+            <FolderPlus data-icon="inline-start" /> Tạo nhóm
+          </Button>
         </div>
         <div className="sl-metrics-list">
           {loading && termList.terms.length === 0 ? (
             <p className="sl-metric-muted"><LoaderCircle className="sl-spin" /> Đang tải thuật ngữ…</p>
-          ) : visibleTerms.length === 0 ? (
+          ) : visibleTerms.length === 0 && (filtering || termList.groups.length === 0) ? (
             <p className="sl-metric-muted">
               {termList.terms.length === 0
                 ? 'Chưa có thuật ngữ nào. Bấm "Tạo thuật ngữ" để bắt đầu.'
                 : 'Không có thuật ngữ nào khớp bộ lọc.'}
             </p>
-          ) : visibleTerms.map(term => (
-            <button
-              key={term.id}
-              type="button"
-              className={`sl-metrics-item${isSelected(term) ? ' is-selected' : ''}`}
-              onClick={() => { setSelectedId(term.id); setEditing(null); }}
-            >
-              <span className={`sl-metrics-dot is-${term.state}`} title={STATE_LABELS[term.state]} />
-              <span className="sl-metrics-item-name">{term.canonical_name}</span>
-            </button>
-          ))}
+          ) : (
+            <GroupedList
+              noun="thuật ngữ"
+              groups={termList.groups}
+              items={visibleTerms}
+              groupIdOf={term => term.group?.id ?? null}
+              filtered={filtering}
+              onEditGroup={group => groupWorkspace.startEditing(group)}
+              onDeleteGroup={groupWorkspace.setDeleting}
+              renderItem={term => (
+                <button
+                  key={term.id}
+                  type="button"
+                  className={`sl-metrics-item${isSelected(term) ? ' is-selected' : ''}`}
+                  onClick={() => { setSelectedId(term.id); setEditing(null); }}
+                >
+                  <span className={`sl-metrics-dot is-${term.state}`} title={STATE_LABELS[term.state]} />
+                  <span className="sl-metrics-item-name">{term.canonical_name}</span>
+                </button>
+              )}
+            />
+          )}
         </div>
       </aside>
       <section className="sl-metrics-detail" aria-label="Chi tiết thuật ngữ">
@@ -347,6 +398,7 @@ export function Glossary() {
               draft={creation && !editorTerm ? draftFromRequest(creation) : null}
               datasets={datasets}
               users={termList.users}
+              groups={termList.groups}
               onCancel={closeEditor}
               onSaved={termId => void saveFromEditor(termId)}
             />
@@ -383,7 +435,14 @@ export function Glossary() {
                 ) : null}
               </div>
             </header>
-            <TermDetail key={selectedTerm.id} term={selectedTerm} historyRevision={historyRevision} />
+            <TermDetail
+              key={selectedTerm.id}
+              term={selectedTerm}
+              groups={termList.groups}
+              historyRevision={historyRevision}
+              moving={moving}
+              onMove={groupId => void moveTerm(selectedTerm, groupId)}
+            />
           </>
         )}
       </section>
@@ -394,6 +453,22 @@ export function Glossary() {
         busy={deciding}
         onConfirm={reason => { if (openDecision) void decide(openDecision, reason); }}
         onClose={() => setOpenDecision(null)}
+      />
+      <GroupDialog
+        noun="thuật ngữ"
+        editing={groupWorkspace.editing}
+        busy={groupWorkspace.busy}
+        error={groupWorkspace.dialogError}
+        onSave={values => void groupWorkspace.save(values)}
+        onClose={() => groupWorkspace.startEditing(null)}
+      />
+      <GroupDeleteDialog
+        noun="thuật ngữ"
+        group={groupWorkspace.deleting}
+        memberCount={termList.terms.filter(term => term.group?.id === groupWorkspace.deleting?.id).length}
+        busy={groupWorkspace.busy}
+        onConfirm={() => void groupWorkspace.remove()}
+        onClose={() => groupWorkspace.setDeleting(null)}
       />
     </div>
   );

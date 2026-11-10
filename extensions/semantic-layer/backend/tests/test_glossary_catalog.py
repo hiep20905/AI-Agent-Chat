@@ -102,11 +102,12 @@ def test_discovery_cannot_accept_a_client_selected_dataset_or_link_id_scope():
 def test_discovery_executes_link_level_redaction_and_omits_terms_without_visible_links():
     allowed = SimpleNamespace(id=7)
     denied = SimpleNamespace(id=8)
+    group = SimpleNamespace(id=4, name="Nhiệt độ")
     first = SimpleNamespace(
-        id=101, term_id=1, definition="Allowed", synonyms=[], term=SimpleNamespace(canonical_name="A")
+        id=101, term_id=1, definition="Allowed", synonyms=[], term=SimpleNamespace(canonical_name="A", group=group)
     )
     second = SimpleNamespace(
-        id=102, term_id=2, definition="Denied", synonyms=[], term=SimpleNamespace(canonical_name="B")
+        id=102, term_id=2, definition="Denied", synonyms=[], term=SimpleNamespace(canonical_name="B", group=None)
     )
     allowed_link = SimpleNamespace(
         kind="dataset", dataset_id=7, column_name=None, metric_id=None, target=None, fingerprint="7:dataset:"
@@ -124,6 +125,8 @@ def test_discovery_executes_link_level_redaction_and_omits_terms_without_visible
             {
                 "term_id": 1,
                 "canonical_name": "A",
+                # The group lets a consumer read terms of the same meaning together.
+                "group": {"id": 4, "name": "Nhiệt độ"},
                 "definition": "Allowed",
                 "synonyms": [],
                 "links": [{"kind": "dataset", "dataset_id": 7, "column_name": None, "metric_id": None}],
