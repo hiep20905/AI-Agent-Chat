@@ -36,6 +36,7 @@ from ..services.members import (
     temporal_columns,
     time_ranges_from_rows,
 )
+from ..services.metric_review import metric_query_defaults_on
 from ..services.relationship_lookup import base_tables, relationship_ends
 from ..services.relationships import relationship_is_approved_current
 from ..services.schema_graph import GRAPH_VERSION, graph_edges, table_node
@@ -148,6 +149,7 @@ class ConsumerRoutes:
             can_access_dataset,
             semantic_query_row_cap(),
             self._catalog_metric_details(set(datasets)),
+            metric_query_defaults_on(datasets),
         )
         label_dimensions(catalog["datasets"])
         return self.response(200, **catalog)

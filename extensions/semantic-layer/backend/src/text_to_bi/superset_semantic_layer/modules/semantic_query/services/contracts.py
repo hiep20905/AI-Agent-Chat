@@ -1,6 +1,8 @@
 import hashlib
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import sqlglot
@@ -9,6 +11,13 @@ from sqlglot.errors import SqlglotError
 
 from ....common.utils.type_formatter import canonical_json
 from ..exceptions import ApprovedMetricContractRequiredError, MetricContractValidationError
+from .query_defaults import (
+    MetricQueryDefaults,
+    applied_query_defaults,
+    checked_query_filter,
+    query_column,
+    time_axis_column,
+)
 
 _IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _AGGREGATES = (exp.Avg, exp.Count, exp.Max, exp.Min, exp.Sum)
@@ -46,8 +55,6 @@ METRIC_CONTRACT_RULE = (
 )
 MAX_DIMENSIONS = 50
 MAX_FILTERS = 50
-MAX_FILTER_VALUES = 100
-MAX_FILTER_STRING_LENGTH = 1024
 
 
 @dataclass(frozen=True)
@@ -235,12 +242,16 @@ def _safe_connection_identity(database: Any) -> dict[str, Any]:
 safe_connection_identity = _safe_connection_identity
 
 
-def metric_contract_hash(dataset: Any, metric: Any) -> str:
+def metric_contract_hash(dataset: Any, metric: Any, defaults: Any = None) -> str:
     """Hash the live identity of a saved metric, including its datasource location.
 
     The JSON encoding deliberately distinguishes a physical table from a virtual
     dataset SQL definition.  Approval is invalid as soon as any of these values
     changes.
+
+    ``defaults`` are the metric's grain, time anchor and default filters (``MetricQueryDefaults``). They are part of
+    what the metric means, so changing them voids an approval as a formula edit does; a metric without any keeps the
+    hash it had before they existed.
     """
     database = getattr(dataset, "database", None)
     metric_column = _metric_column(dataset, metric)
@@ -257,23 +268,25 @@ def metric_contract_hash(dataset: Any, metric: Any) -> str:
         "database": _safe_connection_identity(database),
         "metric_column_expression": getattr(metric_column, "expression", None),
     }
+    if defaults is not None and not defaults.is_empty():
+        payload["query_defaults"] = defaults.as_dict()
     canonical = canonical_json(payload)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def contract_is_approved_current(contract: Any, dataset: Any, metric: Any) -> bool:
-    """Return true only for an approved record bound to this live dataset/metric."""
+def contract_is_approved_current(contract: Any, dataset: Any, metric: Any, defaults: Any = None) -> bool:
+    """Return true only for an approved record bound to this live dataset/metric and its query defaults."""
     return bool(
         contract
         and getattr(contract, "status", None) == "approved"
         and getattr(contract, "dataset_id", None) == getattr(dataset, "id", None)
         and getattr(contract, "metric_id", None) == getattr(metric, "id", None)
         and metric_is_eligible_for_contract(dataset, metric)
-        and getattr(contract, "expression_hash", None) == metric_contract_hash(dataset, metric)
+        and getattr(contract, "expression_hash", None) == metric_contract_hash(dataset, metric, defaults)
     )
 
 
-def metric_contract_state(contract: Any, dataset: Any, metric: Any) -> str:
+def metric_contract_state(contract: Any, dataset: Any, metric: Any, defaults: Any = None) -> str:
     """The review state an administrator sees for a metric.
 
     ``outdated`` is a candidate or approval whose metric changed after it was recorded, so it can be neither
@@ -286,95 +299,106 @@ def metric_contract_state(contract: Any, dataset: Any, metric: Any) -> str:
     if status == "revoked":
         return "revoked"
     if status == "approved":
-        return "approved" if contract_is_approved_current(contract, dataset, metric) else "outdated"
-    unchanged = eligible and getattr(contract, "expression_hash", None) == metric_contract_hash(dataset, metric)
+        return "approved" if contract_is_approved_current(contract, dataset, metric, defaults) else "outdated"
+    current_hash = metric_contract_hash(dataset, metric, defaults)
+    unchanged = eligible and getattr(contract, "expression_hash", None) == current_hash
     return "candidate" if unchanged else "outdated"
 
 
-def build_metric_chart_payload(dataset: Any, metric: Any, query: Any, max_rows: int) -> dict[str, Any]:
-    """Make the only ChartData payload accepted by metric execution.
+def planned_metric_chart(
+    dataset: Any,
+    metric: Any,
+    query: Any,
+    max_rows: int,
+    defaults: MetricQueryDefaults | None = None,
+    latest_time: Callable[[list[dict[str, Any]]], Any] | None = None,
+    now: datetime | None = None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Make the only ChartData payload accepted by metric execution, and say which of the metric's defaults it applied.
 
-    This admits names from live TableColumn metadata only; it intentionally has
-    no SQL, join, expression, arbitrary metric, or client-controlled row-limit
-    escape hatch.
+    This admits names from live TableColumn metadata only; it intentionally has no SQL, join, expression, arbitrary
+    metric, or client-controlled row-limit escape hatch. Besides dimensions and filters a caller may send `time_grain`
+    to group the metric's time column by another grain, and `apply_defaults: false` to skip the metric's defaults.
     """
     if isinstance(query, dict) and "joins" in query:
         raise MetricContractValidationError("Multi-dataset joins are not supported at execution time.")
-    if not isinstance(query, dict) or set(query) - {"dimensions", "filters"}:
-        raise MetricContractValidationError("Request may contain only dimensions and filters.")
+    if not isinstance(query, dict) or set(query) - {"dimensions", "filters", "time_grain", "apply_defaults"}:
+        raise MetricContractValidationError(
+            "Request may contain only dimensions, filters, time_grain and apply_defaults."
+        )
     dimensions = query.get("dimensions", [])
     filters = query.get("filters", [])
     if not isinstance(dimensions, list) or not isinstance(filters, list):
         raise MetricContractValidationError("dimensions and filters must be arrays.")
     if len(dimensions) > MAX_DIMENSIONS or len(filters) > MAX_FILTERS:
         raise MetricContractValidationError("Too many dimensions or filters.")
+    apply_defaults = query.get("apply_defaults", True)
+    if not isinstance(apply_defaults, bool):
+        raise MetricContractValidationError("apply_defaults phải là true hoặc false.")
     columns = {str(getattr(column, "column_name", "")): column for column in getattr(dataset, "columns", [])}
-
-    def allowed(name: Any, capability: str) -> str:
-        if not isinstance(name, str) or name not in columns:
-            raise MetricContractValidationError("Unknown dataset column.")
-        column = columns[name]
-        # These are the capability fields actually present on Superset
-        # TableColumn. Datasource/RLS access remains ChartData's responsibility.
-        if (
-            getattr(column, "is_active", None) is not True
-            or getattr(column, capability, None) is not True
-        ):
-            raise MetricContractValidationError("Column is not available for this operation.")
-        if getattr(column, "expression", None):
-            raise MetricContractValidationError("calculated columns are not available for this operation.")
-        return name
-
-    selected = [allowed(name, "groupby") for name in dimensions]
+    selected = [query_column(columns, name, "groupby") for name in dimensions]
     if len(set(selected)) != len(selected):
         raise MetricContractValidationError("Duplicate dimensions are not allowed.")
-    chart_filters = []
-    allowed_operators = {"==", "!=", "<", "<=", ">", ">=", "IN", "NOT IN"}
-    for item in filters:
-        if not isinstance(item, dict) or set(item) != {"column", "operator", "value"}:
-            raise MetricContractValidationError("Each filter requires column, operator, and value.")
-        operator = item["operator"]
-        if operator not in allowed_operators:
-            raise MetricContractValidationError("Unsupported filter operator.")
-        value = item["value"]
-        is_membership_operator = operator in {"IN", "NOT IN"}
-        if is_membership_operator != isinstance(value, list):
-            raise MetricContractValidationError(
-                "IN and NOT IN require a list; scalar operators require a scalar value."
-            )
-        values = value if is_membership_operator else [value]
-        if not values or len(values) > MAX_FILTER_VALUES or any(not _scalar_filter_value(item) for item in values):
-            raise MetricContractValidationError("Filter value must be a bounded non-null scalar or list of scalars.")
-        chart_filters.append({"col": allowed(item["column"], "filterable"), "op": operator, "val": value})
-    return {
+    chart_filters = [checked_query_filter(columns, item) for item in filters]
+    filtered_columns = {item["col"] for item in chart_filters}
+    default_filters, time_grain, applied = applied_query_defaults(
+        defaults, filtered_columns, selected, query.get("time_grain"), apply_defaults, latest_time, now
+    )
+    time_column = defaults.time_column if defaults else None
+    chart_columns: list[Any] = [
+        time_axis_column(name, time_grain) if time_grain and name == time_column else name for name in selected
+    ]
+    payload = {
         "datasource": {"id": dataset.id, "type": "table"},
         "queries": [
-            {"columns": selected, "metrics": [metric.metric_name], "filters": chart_filters, "row_limit": max_rows + 1}
+            {
+                "columns": chart_columns,
+                "metrics": [metric.metric_name],
+                "filters": chart_filters + default_filters,
+                "row_limit": max_rows + 1,
+            }
         ],
         "result_type": "full",
         "result_format": "json",
     }
+    return payload, applied
+
+
+def build_metric_chart_payload(
+    dataset: Any, metric: Any, query: Any, max_rows: int, defaults: MetricQueryDefaults | None = None
+) -> dict[str, Any]:
+    """The ChartData payload of `planned_metric_chart`, without the account of the defaults it applied."""
+    return planned_metric_chart(dataset, metric, query, max_rows, defaults)[0]
 
 
 def execute_approved_chart_query(
-    contract: Any, dataset: Any, metric: Any, query: Any, max_rows: int, runner: Any, allow_candidate: bool = False
+    contract: Any,
+    dataset: Any,
+    metric: Any,
+    query: Any,
+    max_rows: int,
+    runner: Any,
+    allow_candidate: bool = False,
+    defaults: MetricQueryDefaults | None = None,
+    latest_time: Callable[[list[dict[str, Any]]], Any] | None = None,
 ) -> Any:
     """Gate the ChartData runner before it can validate or execute anything.
 
     ``allow_candidate`` lets a candidate whose metric is unchanged since it was proposed run: callers grant it to
     administrators, as a review preview, and to a candidate the AI Agent built, as a provisional figure. Any other
-    metric runs only once approved.
+    metric runs only once approved. ``defaults`` are the metric's live query defaults: they are part of what was
+    reviewed and are applied to the query, and the result then carries ``applied_defaults``.
     """
     previewable = (
-        allow_candidate and contract is not None and metric_contract_state(contract, dataset, metric) == "candidate"
+        allow_candidate
+        and contract is not None
+        and metric_contract_state(contract, dataset, metric, defaults) == "candidate"
     )
-    if not previewable and not contract_is_approved_current(contract, dataset, metric):
+    if not previewable and not contract_is_approved_current(contract, dataset, metric, defaults):
         raise ApprovedMetricContractRequiredError()
-    return runner(build_metric_chart_payload(dataset, metric, query, max_rows))
-
-
-def _scalar_filter_value(value: Any) -> bool:
-    if isinstance(value, str):
-        return len(value) <= MAX_FILTER_STRING_LENGTH
-    return isinstance(value, (int, float, bool))
+    payload, applied = planned_metric_chart(dataset, metric, query, max_rows, defaults, latest_time)
+    result = runner(payload)
+    if applied is not None and isinstance(result, dict):
+        return {**result, "applied_defaults": applied}
+    return result
 

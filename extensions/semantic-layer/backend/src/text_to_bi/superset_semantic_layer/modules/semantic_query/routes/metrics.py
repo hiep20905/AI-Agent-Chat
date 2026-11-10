@@ -44,6 +44,7 @@ from ..exceptions import (
     MetricSelfApprovalError,
 )
 from ..models import MetricContract, MetricDefinition
+from ..services.chart_data import latest_moment
 from ..services.contracts import (
     contract_is_approved_current,
     execute_approved_chart_query,
@@ -52,13 +53,21 @@ from ..services.contracts import (
     metric_contract_state,
     parse_contract_metric,
 )
-from ..services.formula_reading import FormulaVocabulary, RowKindGrain, read_formula
+from ..services.formula_reading import FormulaVocabulary, RowKindGrain, formula_row_kinds, read_formula
 from ..services.limits import (
     METRIC_DEFINITION_MAX_LENGTH,
     METRIC_UNIT_MAX_LENGTH,
     semantic_query_row_cap,
 )
-from ..services.metric_review import metric_contract_for, metric_definition_for, record_metric_event, review_reason
+from ..services.metric_review import (
+    metric_contract_for,
+    metric_definition_for,
+    metric_query_defaults_for,
+    metric_query_defaults_on,
+    record_metric_event,
+    review_reason,
+)
+from ..services.query_defaults import checked_query_defaults, stored_filters
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +81,9 @@ class MetricContractRoutes:
         return next((metric for metric in dataset.metrics if metric.id == metric_id), None)
 
     @staticmethod
-    def _serialize_metric_contract(contract: MetricContract, dataset: SqlaTable, metric: Any) -> dict[str, Any]:
+    def _serialize_metric_contract(
+        contract: MetricContract, dataset: SqlaTable, metric: Any, defaults: Any = None
+    ) -> dict[str, Any]:
         """Do not expose expression/hash in execution-facing responses."""
         return {
             "id": contract.id,
@@ -86,7 +97,7 @@ class MetricContractRoutes:
             "approved_at": iso_datetime(contract.approved_at),
             "revoker_id": contract.revoker_id,
             "revoked_at": iso_datetime(contract.revoked_at),
-            "current": contract_is_approved_current(contract, dataset, metric),
+            "current": contract_is_approved_current(contract, dataset, metric, defaults),
         }
 
     @staticmethod
@@ -150,6 +161,41 @@ class MetricContractRoutes:
             for dataset_id in dataset_ids
         }
 
+    @staticmethod
+    def _metric_time_context(datasets: list[SqlaTable]) -> dict[int, dict[str, Any]]:
+        """What each dataset's data dictionary says about time, for a metric's grain and time anchor: the main time
+        column, the row kind column with the grain of each kind, and the date or timestamp columns a query can filter.
+        """
+        dataset_ids = [dataset.id for dataset in datasets]
+        if not dataset_ids:
+            return {}
+        dictionaries = {item.id: item for item in dataset_dictionary_repository().list_by_ids(dataset_ids)}
+        temporal_kinds = {
+            (entry.dataset_id, entry.column_name): entry.temporal_kind
+            for entry in column_dictionary_repository().list_for_datasets(dataset_ids)
+        }
+        row_kinds: dict[int, list[dict[str, Any]]] = {dataset_id: [] for dataset_id in dataset_ids}
+        for grain in dataset_grain_repository().list_for_datasets(dataset_ids):
+            row_kind = {"value": grain.row_kind_value, "label": grain.label, "grain": grain.grain}
+            row_kinds[grain.dataset_id].append(row_kind)
+        context = {}
+        for dataset in datasets:
+            dictionary = dictionaries.get(dataset.id)
+            context[dataset.id] = {
+                "time_column": getattr(dictionary, "time_column", None),
+                "row_kind_column": getattr(dictionary, "row_kind_column", None),
+                "row_kinds": row_kinds[dataset.id],
+                "temporal_columns": [
+                    column.column_name
+                    for column in dataset.columns
+                    if column.is_active is True
+                    and not column.expression
+                    and column.filterable is True
+                    and (column.is_dttm or temporal_kinds.get((dataset.id, column.column_name)))
+                ],
+            }
+        return context
+
     @expose("/metric-contracts", methods=("GET",))
     @protect()
     @safe
@@ -174,6 +220,8 @@ class MetricContractRoutes:
         } if dataset_ids else {}
         user_name = user_names()
         vocabularies = self._formula_vocabularies(datasets)
+        all_defaults = metric_query_defaults_on(dataset_ids)
+        time_context = self._metric_time_context(datasets)
         metrics = []
         for dataset in datasets:
             for metric in dataset.metrics:
@@ -181,6 +229,7 @@ class MetricContractRoutes:
                 if metric.metric_name == "count" or str(metric.expression or "").replace(" ", "").upper() == "COUNT(*)":
                     continue
                 contract = contracts.get((dataset.id, metric.id))
+                defaults = all_defaults.get((dataset.id, metric.id))
                 formula = parse_contract_metric(str(metric.expression or ""))
                 metrics.append(
                     {
@@ -194,9 +243,10 @@ class MetricContractRoutes:
                         "formula": formula.as_dict() if formula else None,
                         "reading": read_formula(formula, vocabularies[dataset.id]) if formula else None,
                         "ineligibility": metric_contract_ineligibility(dataset, metric),
-                        "state": metric_contract_state(contract, dataset, metric),
+                        "state": metric_contract_state(contract, dataset, metric, defaults),
+                        "query_defaults": defaults.as_dict() if defaults else None,
                         "contract": {
-                            **self._serialize_metric_contract(contract, dataset, metric),
+                            **self._serialize_metric_contract(contract, dataset, metric, defaults),
                             "owner_name": user_name(contract.owner_id),
                             "approver_name": user_name(contract.approver_id),
                             "revoker_name": user_name(contract.revoker_id),
@@ -208,7 +258,7 @@ class MetricContractRoutes:
                 )
         return self.response(
             200,
-            datasets=[self._query_dataset(dataset) for dataset in datasets],
+            datasets=[{**self._query_dataset(dataset), **time_context[dataset.id]} for dataset in datasets],
             metrics=metrics,
             users=self._active_users(),
             current_user_id=current_user.id,
@@ -237,12 +287,13 @@ class MetricContractRoutes:
         if metric_definition_for(dataset_id, metric_id) is None:
             raise MetricContractValidationError("Nhập định nghĩa nghiệp vụ trước khi đề xuất metric.")
         contract = metric_contract_for(dataset_id, metric_id)
+        defaults = metric_query_defaults_for(dataset_id, metric_id)
         approved = contract is not None and contract.status == "approved"
-        if approved and contract_is_approved_current(contract, dataset, metric):
+        if approved and contract_is_approved_current(contract, dataset, metric, defaults):
             raise ApprovedContractExistsError()
         # Hashing lazy-loads the dataset's database, which autoflushes the session, so it must run before a new
         # contract joins the session: a pending contract without its hash would be flushed and break NOT NULL.
-        expression_hash = metric_contract_hash(dataset, metric)
+        expression_hash = metric_contract_hash(dataset, metric, defaults)
         if contract is None:
             contract = MetricContract(dataset_id=dataset_id, metric_id=metric_id, owner_id=current_user.id)
         # Whoever proposes this candidate owns it, even when an earlier proposal came from someone else.
@@ -260,7 +311,7 @@ class MetricContractRoutes:
         contract.revoked_at = None
         record_metric_event(dataset_id, metric_id, "candidate", note, contract)
         db.session.commit()
-        return self.response(201, contract=self._serialize_metric_contract(contract, dataset, metric))
+        return self.response(201, contract=self._serialize_metric_contract(contract, dataset, metric, defaults))
 
     @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/contract/approve", methods=("POST",))
     @protect()
@@ -284,7 +335,8 @@ class MetricContractRoutes:
             raise MetricSelfApprovalError()
         if ineligibility := metric_contract_ineligibility(dataset, metric):
             raise MetricContractValidationError(ineligibility)
-        if contract.expression_hash != metric_contract_hash(dataset, metric):
+        defaults = metric_query_defaults_for(dataset_id, metric_id)
+        if contract.expression_hash != metric_contract_hash(dataset, metric, defaults):
             raise MetricContractValidationError("Metric changed; create a new candidate before approval.")
         note = review_reason(request.get_json(silent=True))
         contract.status = "approved"
@@ -292,7 +344,7 @@ class MetricContractRoutes:
         contract.approved_at = datetime.now(tz=timezone.utc)
         record_metric_event(dataset_id, metric_id, "approve", note, contract)
         db.session.commit()
-        return self.response(200, contract=self._serialize_metric_contract(contract, dataset, metric))
+        return self.response(200, contract=self._serialize_metric_contract(contract, dataset, metric, defaults))
 
     @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/contract/revoke", methods=("POST",))
     @protect()
@@ -319,7 +371,8 @@ class MetricContractRoutes:
         contract.revoked_at = datetime.now(tz=timezone.utc)
         record_metric_event(dataset_id, metric_id, "revoke", reason, contract)
         db.session.commit()
-        return self.response(200, contract=self._serialize_metric_contract(contract, dataset, metric))
+        defaults = metric_query_defaults_for(dataset_id, metric_id)
+        return self.response(200, contract=self._serialize_metric_contract(contract, dataset, metric, defaults))
 
     @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/definition", methods=("PUT",))
     @protect()
@@ -360,6 +413,57 @@ class MetricContractRoutes:
         record_metric_event(dataset_id, metric_id, "definition")
         db.session.commit()
         return self.response(200, definition=self._serialize_metric_definition(definition, user_names()))
+
+    @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/query-defaults", methods=("PUT",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @csrf_protected
+    @rollback_on_error
+    @handle_errors
+    def save_metric_query_defaults(self, dataset_id: int, metric_id: int):
+        """Save a metric's grain, time anchor and default filters, checked against its dataset and formula.
+
+        They are part of what the metric means, so a change makes an approved or proposed contract outdated until it is
+        proposed and approved again, as a formula edit does.
+        """
+        require_admin()
+        ensure_dictionary_tables()
+        dataset = get_dataset(dataset_id)
+        metric = self._dataset_metric(dataset, metric_id) if dataset else None
+        if metric is None:
+            raise MetricNotFoundError()
+        definition = metric_definition_for(dataset_id, metric_id)
+        if definition is None:
+            raise MetricContractValidationError(
+                "Nhập định nghĩa nghiệp vụ trước khi đặt grain, mốc thời gian và bộ lọc mặc định."
+            )
+        context = self._metric_time_context([dataset])[dataset.id]
+        formula = parse_contract_metric(str(metric.expression or ""))
+        defaults = checked_query_defaults(
+            request.get_json(silent=True),
+            {column.column_name: column for column in dataset.columns},
+            temporal_columns=set(context["temporal_columns"]),
+            dataset_time_column=context["time_column"],
+            row_kind_column=context["row_kind_column"],
+            grains={item["value"]: item["grain"] for item in context["row_kinds"]},
+            formula_row_kinds=formula_row_kinds(formula, context["row_kind_column"]) if formula else set(),
+        )
+        definition.grain = defaults.grain
+        definition.row_kind_value = defaults.row_kind_value
+        definition.time_column = defaults.time_column
+        definition.time_window = defaults.time_window
+        definition.time_anchor = defaults.time_anchor
+        definition.default_filters = stored_filters(defaults)
+        metric_definition_repository().add(definition, flush=False)
+        record_metric_event(dataset_id, metric_id, "definition", "Đổi grain, mốc thời gian hoặc bộ lọc mặc định.")
+        db.session.commit()
+        saved = None if defaults.is_empty() else defaults
+        return self.response(
+            200,
+            query_defaults=saved.as_dict() if saved else None,
+            state=metric_contract_state(metric_contract_for(dataset_id, metric_id), dataset, metric, saved),
+        )
 
     @expose("/dataset/<int:dataset_id>/metrics/<int:metric_id>/contract/events", methods=("GET",))
     @protect()
@@ -419,6 +523,7 @@ class MetricContractRoutes:
             # Administrators may preview a candidate so a reviewer sees real numbers before approving it; a candidate
             # the AI Agent built answers anyone as a provisional figure until it is approved or revoked.
             provisional = getattr(contract, "origin", None) == AGENT_ORIGIN
+            defaults = metric_query_defaults_for(dataset_id, metric_id)
             result = execute_approved_chart_query(
                 contract,
                 dataset,
@@ -427,6 +532,8 @@ class MetricContractRoutes:
                 semantic_query_row_cap(),
                 run_chart,
                 allow_candidate=is_admin() or provisional,
+                defaults=defaults,
+                latest_time=lambda filters: latest_moment(dataset, defaults.time_column, filters),
             )
         except SemanticLayerError:
             raise
@@ -452,4 +559,6 @@ class MetricContractRoutes:
             # The SQL Superset ran, RLS predicates included, so only administrators see it.
             sql=result.get("query") if is_admin() else None,
             preview=contract is not None and contract.status == "candidate",
+            # The metric's row kind, default filters, time window and grain this run used, so the caller can say so.
+            applied_defaults=result.get("applied_defaults"),
         )

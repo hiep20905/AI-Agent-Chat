@@ -76,6 +76,20 @@ def build_time_range_payload(dataset: Any, columns: list[str]) -> dict[str, Any]
     }
 
 
+def build_latest_time_payload(dataset: Any, column: str, filters: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """One aggregate row: the latest value of a time column among the rows the filters keep; None for a column whose
+    name is not simple enough to write into MAX()."""
+    if not SIMPLE_IDENTIFIER.match(column):
+        return None
+    metric = {"expressionType": "SQL", "sqlExpression": f"MAX({column})", "label": "latest_moment"}
+    return {
+        "datasource": {"id": dataset.id, "type": "table"},
+        "queries": [{"columns": [], "metrics": [metric], "filters": filters, "row_limit": 1}],
+        "result_type": "full",
+        "result_format": "json",
+    }
+
+
 def time_ranges_from_rows(rows: list[dict[str, Any]], columns: list[str]) -> list[dict[str, Any]]:
     row = rows[0] if rows else {}
     ranges = [

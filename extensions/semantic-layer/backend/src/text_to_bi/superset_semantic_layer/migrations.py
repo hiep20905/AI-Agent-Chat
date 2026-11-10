@@ -172,6 +172,23 @@ def _migrate_dictionary_tables():
             )
 
     with db.engine.begin() as connection:
+        definition_columns = {
+            column["name"] for column in inspect(connection).get_columns(MetricDefinition.__tablename__)
+        }
+        for column_name, column_type in (
+            ("grain", "VARCHAR(16)"),
+            ("row_kind_value", "VARCHAR(255)"),
+            ("time_column", "VARCHAR(255)"),
+            ("time_window", "VARCHAR(32)"),
+            ("time_anchor", "VARCHAR(16)"),
+            ("default_filters", "TEXT"),
+        ):
+            if column_name not in definition_columns:
+                connection.execute(
+                    text(f"ALTER TABLE text_to_bi_metric_definition ADD COLUMN {column_name} {column_type}")
+                )
+
+    with db.engine.begin() as connection:
         relationship_columns = {
             column["name"] for column in inspect(connection).get_columns(RelationshipContract.__tablename__)
         }

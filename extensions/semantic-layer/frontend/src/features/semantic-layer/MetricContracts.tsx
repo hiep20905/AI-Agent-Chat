@@ -46,7 +46,7 @@ function reviewSummary(metric: MetricReviewItem, viewerId: number | null, second
     case 'revoked':
       return `Thu hồi bởi ${contract?.revoker_name ?? '—'} · ${formatDate(contract?.revoked_at ?? null)}`;
     case 'outdated':
-      return 'Công thức đã đổi sau lần duyệt · cần đề xuất lại';
+      return 'Công thức, grain, mốc thời gian hoặc bộ lọc mặc định đã đổi sau lần duyệt · cần đề xuất lại';
     case 'not_started':
       return metric.definition ? 'Chưa đề xuất' : 'Chưa có định nghĩa nghiệp vụ';
     default:
@@ -335,6 +335,7 @@ export function MetricContracts({ databaseId }: MetricContractsProps) {
               <MetricDefinitionPanel
                 key={selectedMetricKey}
                 metric={selectedMetric}
+                dataset={datasetById.get(selectedMetric.dataset_id)}
                 users={reviewList.users}
                 historyRevision={historyRevision}
                 onDefinitionSaved={() => void refreshAfterChange()}

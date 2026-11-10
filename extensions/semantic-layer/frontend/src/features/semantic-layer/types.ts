@@ -69,6 +69,8 @@ export type MetricContractExecution = {
   sql?: string | null;
   /** True when an administrator ran a candidate that is not approved yet. */
   preview?: boolean;
+  /** The metric's row kind, default filters, time window and grain this run used; null when it has none. */
+  applied_defaults?: MetricAppliedDefaults | null;
 };
 
 /** What a metric means to the business; a metric needs one before it can be proposed. */
@@ -135,6 +137,7 @@ export type MetricReviewItem = {
   state: MetricReviewState;
   contract: (MetricContract & { owner_name: string | null; approver_name: string | null; revoker_name: string | null }) | null;
   definition: MetricDefinition | null;
+  query_defaults: MetricQueryDefaults | null;
 };
 
 /** A dataset column a metric run may group by or filter on. */
@@ -147,7 +150,17 @@ export type MetricQueryColumn = {
   filterable: boolean;
 };
 
-export type MetricQueryDataset = { id: number; name: string; columns: MetricQueryColumn[] };
+export type MetricQueryDataset = {
+  id: number;
+  name: string;
+  columns: MetricQueryColumn[];
+  /** From the data dictionary: the main time column, the row kind column and the grain of each kind of row. */
+  time_column: string | null;
+  row_kind_column: string | null;
+  row_kinds: Array<{ value: string | null; label: string | null; grain: string }>;
+  /** Date and timestamp columns a metric can be filtered by. */
+  temporal_columns: string[];
+};
 
 export type MetricReviewList = {
   datasets: MetricQueryDataset[];
@@ -161,6 +174,41 @@ export type MetricReviewList = {
 export type MetricFilterOperator = '==' | '!=' | '<' | '<=' | '>' | '>=' | 'IN' | 'NOT IN';
 
 export type MetricQueryFilter = { column: string; operator: MetricFilterOperator; value: string | number | boolean | Array<string | number> };
+
+export type MetricGrain = 'hour' | 'day' | 'week' | 'month' | 'quarter' | 'year';
+export type MetricTimeAnchor = 'now' | 'latest_data';
+
+/** How a metric is read unless a query says otherwise; changing it voids an approval like a formula edit. */
+export type MetricQueryDefaults = {
+  grain: MetricGrain | null;
+  row_kind_column: string | null;
+  row_kind_value: string | null;
+  /** The grain of the rows the metric reads, from the data dictionary. */
+  native_grain: string | null;
+  time_column: string | null;
+  /** `last_<n>_<unit>`, `current_<unit>`, `previous_<unit>` or `<unit>_to_date`. */
+  time_window: string | null;
+  time_anchor: MetricTimeAnchor | null;
+  default_filters: MetricQueryFilter[];
+};
+
+export type MetricQueryDefaultsPayload = Pick<
+  MetricQueryDefaults, 'grain' | 'row_kind_value' | 'time_column' | 'time_window' | 'time_anchor' | 'default_filters'
+>;
+
+export type MetricAppliedDefaults = {
+  filters: Array<MetricQueryFilter & { source: 'row_kind' | 'default' | 'time_window' }>;
+  time_window: {
+    window: string;
+    anchor: MetricTimeAnchor;
+    column: string;
+    reference: string;
+    start: string;
+    end: string;
+    end_included: boolean;
+  } | null;
+  time_grain: MetricGrain | null;
+};
 
 export type GlossaryStatus = 'draft' | 'approved' | 'revoked';
 /** Review state of a term: `outdated` is an approval whose linked column or metric changed since it was saved. */

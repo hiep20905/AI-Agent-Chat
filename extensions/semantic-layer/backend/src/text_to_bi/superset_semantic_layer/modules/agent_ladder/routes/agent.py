@@ -25,6 +25,8 @@ from ...semantic_query.services.contracts import metric_contract_hash, metric_co
 from ...semantic_query.services.metric_review import (
     metric_contract_for,
     metric_definition_for,
+    metric_query_defaults_for,
+    metric_query_defaults_on,
     record_metric_event,
     review_reason,
 )
@@ -127,6 +129,7 @@ class AgentLadderRoutes:
             if dataset_ids
             else {}
         )
+        query_defaults = metric_query_defaults_on(dataset_ids)
         described = []
         for dataset in sorted(datasets, key=lambda item: item.table_name):
             dictionary = dictionaries[dataset.id]
@@ -144,7 +147,12 @@ class AgentLadderRoutes:
                     "metrics": [
                         source_metric(
                             metric,
-                            metric_contract_state(contracts.get((dataset.id, metric.id)), dataset, metric),
+                            metric_contract_state(
+                                contracts.get((dataset.id, metric.id)),
+                                dataset,
+                                metric,
+                                query_defaults.get((dataset.id, metric.id)),
+                            ),
                             getattr(contracts.get((dataset.id, metric.id)), "origin", None),
                             definitions.get((dataset.id, metric.id)),
                         )
@@ -188,8 +196,9 @@ class AgentLadderRoutes:
 
         metric = matching_metric(dataset, draft.expression)
         contract = metric_contract_for(dataset_id, metric.id) if metric is not None else None
+        defaults = metric_query_defaults_for(dataset_id, metric.id) if metric is not None else None
         if contract is not None:
-            state = metric_contract_state(contract, dataset, metric)
+            state = metric_contract_state(contract, dataset, metric, defaults)
             if state == "approved":
                 return self.response(200, metric=self._agent_metric(dataset, metric), provisional=False)
             if state == "candidate" and contract.origin == AGENT_ORIGIN:
@@ -220,7 +229,7 @@ class AgentLadderRoutes:
             metric_definition_repository().add(definition, flush=False)
         # Hashing lazy-loads the dataset's database, which autoflushes, so it runs before the contract joins
         # the session.
-        expression_hash = metric_contract_hash(dataset, metric)
+        expression_hash = metric_contract_hash(dataset, metric, defaults)
         contract = MetricContract(
             dataset_id=dataset_id,
             metric_id=metric.id,

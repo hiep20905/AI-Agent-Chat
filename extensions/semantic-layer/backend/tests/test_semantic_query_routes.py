@@ -23,7 +23,13 @@ from text_to_bi.superset_semantic_layer.modules.semantic_query.services.contract
 from text_to_bi.superset_semantic_layer.modules.semantic_query.services.formula_reading import (
     FormulaVocabulary,
     RowKindGrain,
+    formula_row_kinds,
     read_formula,
+)
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.query_defaults import (
+    MetricQueryDefaults,
+    checked_query_defaults,
+    stored_filters,
 )
 from text_to_bi.superset_semantic_layer.modules.semantic_query.services.relationship_discovery import (
     SOURCES,
@@ -133,7 +139,7 @@ def _route_api(datasets):
         "revoke_metric_contract", "execute_metric_contract", "create_relationship_contract_candidate",
         "approve_relationship_contract", "revoke_relationship_contract", "semantic_catalog", "_query_dataset",
         "list_metric_contracts", "_active_users", "_serialize_metric_definition", "_formula_vocabularies",
-        "save_metric_definition", "list_metric_contract_events",
+        "save_metric_definition", "list_metric_contract_events", "save_metric_query_defaults", "_metric_time_context",
         "create_agent_metric", "_agent_metric", "_relationship_contract_fields", "_snapshot_relationship_candidate",
     }
     shared = [
@@ -197,6 +203,12 @@ def _route_api(datasets):
         "METRIC_REVIEW_REASON_MAX_LENGTH": 2000,
         "METRIC_DEFINITION_MAX_LENGTH": 4000,
         "METRIC_UNIT_MAX_LENGTH": 64,
+        "metric_query_defaults_for": lambda *_: None,
+        "metric_query_defaults_on": lambda *_: {},
+        "latest_moment": lambda *_: None,
+        "checked_query_defaults": checked_query_defaults,
+        "stored_filters": stored_filters,
+        "formula_row_kinds": formula_row_kinds,
     }
     compile_into(namespace, *shared, api_class(wanted))
     # A relationship contract's static serializer names the mixin it lives in.
@@ -633,6 +645,103 @@ def test_metric_definition_is_validated_saved_and_logged():
     assert api.save_metric_definition(dataset.id, 4)[0] == 403
 
 
+def _time_dictionary_api(dataset):
+    api, namespace = _route_api({dataset.id: dataset})
+    dataset.columns[0].__dict__.setdefault("is_dttm", False)
+    dataset.columns.append(
+        SimpleNamespace(
+            column_name="ngay", verbose_name=None, type="DATE", is_active=True, groupby=True, filterable=True,
+            expression=None, is_dttm=True,
+        )
+    )
+    dictionary = SimpleNamespace(id=dataset.id, time_column="ngay", row_kind_column=None)
+    namespace["dataset_dictionary_repository"] = lambda: SimpleNamespace(list_by_ids=lambda _: [dictionary])
+    namespace["column_dictionary_repository"] = lambda: SimpleNamespace(list_for_datasets=lambda _: [])
+    grain = SimpleNamespace(dataset_id=dataset.id, row_kind_value=None, label=None, grain="day")
+    namespace["dataset_grain_repository"] = lambda: SimpleNamespace(list_for_datasets=lambda _: [grain])
+    return api, namespace
+
+
+def test_query_defaults_are_validated_saved_logged_and_outdate_the_approval():
+    dataset = _dataset()
+    api, namespace = _time_dictionary_api(dataset)
+    definition = _MetricDefinition(dataset.id, 4, business_definition="Average air temperature.")
+    namespace["metric_definition_for"] = lambda *_: definition
+    contract = _proposed_contract(dataset)
+    contract.status = "approved"
+    namespace["metric_contract_for"] = lambda *_: contract
+    for body in ({"grain": "hour"}, {"time_window": "yesterday"}, {"time_column": "temperature"}, []):
+        _use_request_body(namespace, body)
+        assert api.save_metric_query_defaults(dataset.id, 4)[0] == 400, body
+    body = {
+        "grain": "week",
+        "time_window": "last_30_day",
+        "time_anchor": "latest_data",
+        "default_filters": [{"column": "temperature", "operator": ">", "value": 0}],
+    }
+    _use_request_body(namespace, body)
+    status, payload = api.save_metric_query_defaults(dataset.id, 4)
+
+    assert status == 200 and payload["state"] == "outdated"
+    assert payload["query_defaults"]["time_column"] == "ngay" and payload["query_defaults"]["native_grain"] == "day"
+    assert (definition.grain, definition.time_window, definition.time_anchor) == ("week", "last_30_day", "latest_data")
+    assert json.loads(definition.default_filters) == [{"column": "temperature", "operator": ">", "value": 0}]
+    event = namespace["db"].session.added[-1]
+    assert event.action == "definition" and "grain" in event.reason
+    namespace["metric_definition_for"] = lambda *_: None
+    status, payload = api.save_metric_query_defaults(dataset.id, 4)
+    assert status == 400 and "định nghĩa nghiệp vụ" in payload["message"]
+    namespace["current_user"].roles = []
+    assert api.save_metric_query_defaults(dataset.id, 4)[0] == 403
+
+
+def test_metric_list_carries_query_defaults_and_the_dataset_time_context():
+    dataset = _dataset()
+    dataset.columns[0].__dict__.update(verbose_name="Temperature", type="FLOAT", is_dttm=False)
+    dataset.metrics[0].__dict__.update(verbose_name=None, description=None, d3format=None)
+    defaults = MetricQueryDefaults(grain="week", time_column="ngay", native_grain="day")
+    contract = _proposed_contract(dataset)
+    contract.status = "approved"
+    api, namespace = _metric_list_api(dataset, [contract])
+    _, dictionary_namespace = _time_dictionary_api(dataset)
+    for name in ("dataset_dictionary_repository", "column_dictionary_repository", "dataset_grain_repository"):
+        namespace[name] = dictionary_namespace[name]
+    namespace["metric_query_defaults_on"] = lambda _: {(dataset.id, 4): defaults}
+
+    status, payload = api.list_metric_contracts()
+
+    assert status == 200
+    assert payload["metrics"][0]["query_defaults"]["grain"] == "week"
+    # The approval was given before the defaults existed, so the metric now needs review again.
+    assert payload["metrics"][0]["state"] == "outdated"
+    listed = payload["datasets"][0]
+    assert (listed["time_column"], listed["row_kind_column"], listed["temporal_columns"]) == ("ngay", None, ["ngay"])
+    assert listed["row_kinds"] == [{"value": None, "label": None, "grain": "day"}]
+
+
+def test_execute_passes_the_metric_defaults_and_returns_what_they_applied(monkeypatch):
+    dataset = _dataset()
+    api, namespace = _route_api({dataset.id: dataset})
+    defaults = MetricQueryDefaults(grain="day", time_column="ngay", native_grain="day")
+    metric = dataset.metrics[0]
+    contract = _MetricContract(dataset.id, 4)
+    contract.status, contract.expression_hash = "approved", metric_contract_hash(dataset, metric, defaults)
+    namespace["metric_contract_for"] = lambda *_: contract
+    namespace["metric_query_defaults_for"] = lambda *_: defaults
+    namespace["can_access_dataset"] = lambda _: True
+    _install_chartdata_stubs(monkeypatch)
+    received = {}
+
+    def run(*args, **kwargs):
+        received.update(kwargs)
+        return {"colnames": [], "data": [], "applied_defaults": {"filters": [], "time_window": None}}
+
+    namespace["execute_approved_chart_query"] = run
+    status, payload = api.execute_metric_contract(dataset.id, metric.id)
+    assert status == 200 and received["defaults"] is defaults
+    assert payload["applied_defaults"] == {"filters": [], "time_window": None}
+
+
 def test_metric_events_are_listed_newest_first_with_actor_names():
     dataset = _dataset()
     api, namespace = _route_api({dataset.id: dataset})
@@ -680,7 +789,7 @@ def test_only_administrators_may_preview_a_candidate(monkeypatch):
     _install_chartdata_stubs(monkeypatch)
     grants = []
 
-    def run(*args, allow_candidate=False):
+    def run(*args, allow_candidate=False, **_):
         grants.append(allow_candidate)
         return {"colnames": [], "data": []}
 

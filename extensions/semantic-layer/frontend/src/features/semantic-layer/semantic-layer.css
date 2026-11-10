@@ -392,6 +392,12 @@
 .sl-metric-definition-editor { display: flex; flex-direction: column; gap: 10px; }
 .sl-metric-definition-editor label, .sl-metric-decision-field { display: flex; flex-direction: column; gap: 5px; color: var(--sl-text-secondary); font-size: 12px; font-weight: 500; }
 .sl-metric-definition-row { display: grid; grid-template-columns: minmax(0, 160px) minmax(0, 280px); gap: 10px; }
+.sl-metric-defaults-grid {
+  display: grid; max-width: 640px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px;
+}
+.sl-metric-defaults-toggle {
+  flex-direction: row; align-items: center; gap: 8px; color: var(--sl-text-secondary); font-size: 12px;
+}
 .sl-metric-muted { margin: 0; color: var(--sl-muted); font-size: 12px; }
 .sl-metric-muted svg { width: 14px; height: 14px; vertical-align: middle; }
 .sl-metric-error, .sl-metric-warning { --sl-state-color: #dc2626; display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px; border: 1px solid color-mix(in srgb, var(--sl-state-color) 45%, transparent); border-radius: 7px; color: var(--sl-text); background: color-mix(in srgb, var(--sl-state-color) 10%, transparent); font-size: 12px; }

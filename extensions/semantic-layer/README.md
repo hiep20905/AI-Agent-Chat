@@ -43,12 +43,25 @@ Each catalog metric carries:
   "business_definition": "Nhiệt độ cao nhất ghi nhận trong phạm vi lọc.",
   "unit": "°C",
   "steward_name": "Bao Reviewer",
-  "glossary_terms": [{ "term_id": 3, "name": "Nắng nóng", "synonyms": ["nóng nhất"] }]
+  "glossary_terms": [{ "term_id": 3, "name": "Nắng nóng", "synonyms": ["nóng nhất"] }],
+  "query_defaults": {
+    "grain": "day", "row_kind_column": "loai_quan_sat", "row_kind_value": "DU_BAO_NGAY", "native_grain": "day",
+    "time_column": "thoi_diem_quan_sat", "time_window": "last_7_day", "time_anchor": "latest_data",
+    "default_filters": [{ "column": "thanh_pho_key", "operator": "IN", "value": [1, 2] }]
+  }
 }
 ```
 
 `business_definition`, `unit` and `steward_name` are `null` until an administrator writes the metric's business
 definition. A consumer joins expert rules to metrics through the rule's `metric_ids`.
+
+`query_defaults` (`null` when unset) is how the metric is read unless a query says otherwise: its grain, row kind,
+time column and default time window, counted from now or from the latest data, and its default filters. They are part
+of the reviewed metric: editing them in the Metrics tab leaves an approved metric outdated until it is proposed and
+approved again. The execute endpoint applies them: a caller filter on a column replaces the default on that column,
+`"time_grain"` groups the time column by another grain (never finer than the rows), and `"apply_defaults": false`
+skips them all. The response's `applied_defaults` lists what was applied. See
+[`docs/specs/metric-grain-moc-thoi-gian-bo-loc.md`](../../docs/specs/metric-grain-moc-thoi-gian-bo-loc.md).
 
 ## Structure
 

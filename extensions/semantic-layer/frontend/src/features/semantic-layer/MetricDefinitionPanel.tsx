@@ -5,16 +5,17 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { requestJson, semanticLayerApi } from './api';
+import { MetricQueryDefaultsSection } from './MetricQueryDefaults';
 import type {
-  MetricContractEvent, MetricContractEventAction, MetricDefinitionPayload, MetricFormulaReading, MetricReviewItem,
-  MetricUser,
+  MetricContractEvent, MetricContractEventAction, MetricDefinitionPayload, MetricFormulaReading, MetricQueryDataset,
+  MetricReviewItem, MetricUser,
 } from './types';
 
 const EVENT_LABELS: Record<MetricContractEventAction, string> = {
   candidate: 'đề xuất công thức',
   approve: 'duyệt',
   revoke: 'thu hồi',
-  definition: 'cập nhật định nghĩa nghiệp vụ',
+  definition: 'cập nhật định nghĩa',
 };
 
 const NO_STEWARD = 'none';
@@ -192,14 +193,15 @@ function ReviewHistory({ metric, revision }: { metric: MetricReviewItem; revisio
 
 type MetricDefinitionPanelProps = {
   metric: MetricReviewItem;
+  dataset: MetricQueryDataset | undefined;
   users: MetricUser[];
   historyRevision: number;
   onDefinitionSaved: () => void;
 };
 
-/** The Definition tab: business meaning and formula up front, the review history folded away below. */
+/** The Definition tab: business meaning, how the metric is read and its formula up front, the review history below. */
 export function MetricDefinitionPanel(
-  { metric, users, historyRevision, onDefinitionSaved }: MetricDefinitionPanelProps,
+  { metric, dataset, users, historyRevision, onDefinitionSaved }: MetricDefinitionPanelProps,
 ) {
   const [editing, setEditing] = useState(false);
   const definition = metric.definition;
@@ -247,6 +249,7 @@ export function MetricDefinitionPanel(
           </div>
         )}
       </section>
+      <MetricQueryDefaultsSection metric={metric} dataset={dataset} onSaved={onDefinitionSaved} />
       <section className="sl-metrics-section">
         <h4>Công thức</h4>
         {metric.reading ? (

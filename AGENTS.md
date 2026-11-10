@@ -187,6 +187,11 @@ sense on a measure, `synonyms` and a `description`; a dataset dictionary's
 `indicator_model` declares a table that keeps one value per indicator
 (`tb_gia_tri_quan_sat`) or the catalog naming the indicators
 (`dm_chi_so_thoi_tiet`, read through `/dataset/<id>/indicators`).
+`text_to_bi_metric_definition` also keeps each metric's query defaults: its `grain`, `row_kind_value`, `time_column`,
+default `time_window` and `time_anchor` (`now` or `latest_data`), and `default_filters`. They are checked against the
+dataset's grains and filterable columns, hashed into the metric contract (changing them outdates an approval like a
+formula edit), listed in `/semantic-catalog` and applied by metric execution unless the caller overrides them; see
+`docs/specs/metric-grain-moc-thoi-gian-bo-loc.md`.
 `text_to_bi_dataset_proposal` holds the virtual datasets the AI
 Agent drafts over base (`dm_*`, `tb_*`) datasets when no aggregate dataset can
 answer a question; an administrator creates or rejects them in "Xử lý câu hỏi" →

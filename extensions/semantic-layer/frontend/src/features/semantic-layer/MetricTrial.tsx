@@ -1,34 +1,19 @@
 import React, { useState } from 'react';
 import { AlertCircle, Check, Copy, LoaderCircle, Play, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { requestJson, semanticLayerApi } from './api';
+import { buildFilters, columnLabel, isListOperator, OPERATORS, type FilterDraft } from './metricFilters';
 import { formatDateValue, formatMetricValue, isNumericColumnType } from './metricFormat';
+import { describeApplied } from './MetricQueryDefaults';
 import type {
-  MetricContractExecution, MetricFilterOperator, MetricQueryColumn, MetricQueryDataset, MetricQueryFilter,
-  MetricReviewItem,
+  MetricContractExecution, MetricFilterOperator, MetricQueryColumn, MetricQueryDataset, MetricReviewItem,
 } from './types';
 
-type FilterDraft = { key: number; column: string; operator: MetricFilterOperator; value: string };
-
-const OPERATORS: Array<{ value: MetricFilterOperator; label: string }> = [
-  { value: '==', label: '=' },
-  { value: '!=', label: '≠' },
-  { value: '>', label: '>' },
-  { value: '>=', label: '≥' },
-  { value: '<', label: '<' },
-  { value: '<=', label: '≤' },
-  { value: 'IN', label: 'thuộc' },
-  { value: 'NOT IN', label: 'không thuộc' },
-];
-
-const columnLabel = (column: Pick<MetricQueryColumn, 'column_name' | 'verbose_name'>) => (
-  column.verbose_name || column.column_name
-);
-const isListOperator = (operator: MetricFilterOperator) => operator === 'IN' || operator === 'NOT IN';
 /** Time, text and key columns describe a row; other numeric columns are measures and rarely make good dimensions. */
 const isCategoryColumn = (column: MetricQueryColumn) => (
   column.is_dttm || !isNumericColumnType(column.type) || /_(key|id)$/i.test(column.column_name)
@@ -58,28 +43,6 @@ function ColumnOptions({ groups }: { groups: ColumnGroup[] }) {
   );
 }
 
-/** Turns the typed filter rows into the execute payload, converting values for numeric columns. */
-function buildFilters(drafts: FilterDraft[], columns: MetricQueryColumn[]): MetricQueryFilter[] {
-  return drafts.map(draft => {
-    const column = columns.find(item => item.column_name === draft.column);
-    if (!column) throw new Error('Chọn cột cho mọi bộ lọc.');
-    const numeric = isNumericColumnType(column.type);
-    const convert = (text: string) => {
-      if (!numeric) return text;
-      const number = Number(text);
-      if (!Number.isFinite(number)) throw new Error(`Giá trị lọc của cột ${columnLabel(column)} phải là số.`);
-      return number;
-    };
-    if (isListOperator(draft.operator)) {
-      const parts = draft.value.split(',').map(part => part.trim()).filter(Boolean);
-      if (parts.length === 0) throw new Error(`Nhập ít nhất một giá trị cho cột ${columnLabel(column)}.`);
-      return { column: column.column_name, operator: draft.operator, value: parts.map(convert) };
-    }
-    if (!draft.value.trim()) throw new Error(`Nhập giá trị lọc cho cột ${columnLabel(column)}.`);
-    return { column: column.column_name, operator: draft.operator, value: convert(draft.value.trim()) };
-  });
-}
-
 type MetricTrialProps = { metric: MetricReviewItem; dataset: MetricQueryDataset | undefined };
 
 /** Runs an approved metric through Superset with chosen dimensions and filters, and shows the formatted result. */
@@ -94,6 +57,7 @@ export function MetricTrial({ metric, dataset }: MetricTrialProps) {
   const [runError, setRunError] = useState('');
   const [resultView, setResultView] = useState<'table' | 'sql'>('table');
   const [sqlCopied, setSqlCopied] = useState(false);
+  const [applyDefaults, setApplyDefaults] = useState(true);
 
   const addFilter = () => {
     const textColumn = filterableColumns.find(column => !column.is_dttm && !isNumericColumnType(column.type));
@@ -112,7 +76,8 @@ export function MetricTrial({ metric, dataset }: MetricTrialProps) {
       const filters = buildFilters(filterDrafts, filterableColumns);
       setRunning(true);
       const endpoint = semanticLayerApi.metricContractExecute(metric.dataset_id, metric.metric_id);
-      setResult(await requestJson<MetricContractExecution>(endpoint, 'POST', { dimensions, filters }));
+      const body = applyDefaults ? { dimensions, filters } : { dimensions, filters, apply_defaults: false };
+      setResult(await requestJson<MetricContractExecution>(endpoint, 'POST', body));
     } catch (reason) {
       setRunError(reason instanceof Error ? reason.message : 'Không chạy được metric.');
     } finally {
@@ -227,6 +192,15 @@ export function MetricTrial({ metric, dataset }: MetricTrialProps) {
             </Button>
           )}
         </div>
+        {metric.query_defaults ? (
+          <>
+            <span className="sl-metric-trial-label">Mặc định</span>
+            <label className="sl-metric-trial-field sl-metric-defaults-toggle">
+              <Checkbox checked={applyDefaults} onCheckedChange={checked => setApplyDefaults(checked === true)} />
+              Áp dụng grain, khoảng thời gian và bộ lọc mặc định của metric (bộ lọc trên cùng cột sẽ thay mặc định)
+            </label>
+          </>
+        ) : null}
         <div className="sl-metric-trial-run">
           <Button disabled={running} onClick={() => void run()}>
             {runIcon}
@@ -252,6 +226,9 @@ export function MetricTrial({ metric, dataset }: MetricTrialProps) {
         </div>
       </div>
       {runError ? <div className="sl-metric-error" role="alert"><AlertCircle /> {runError}</div> : null}
+      {result?.applied_defaults && describeApplied(result.applied_defaults, dataset) ? (
+        <p className="sl-metric-muted">Đã áp dụng mặc định: {describeApplied(result.applied_defaults, dataset)}</p>
+      ) : null}
       <div className="sl-metric-result">
         {!result ? (
           <p className="sl-metric-result-empty">Chọn chiều phân tích, bộ lọc rồi bấm Chạy thử để xem kết quả.</p>

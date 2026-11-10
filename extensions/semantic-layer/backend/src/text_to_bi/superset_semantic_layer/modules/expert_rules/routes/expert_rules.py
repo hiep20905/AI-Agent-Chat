@@ -23,6 +23,7 @@ from ...glossary.dependencies import (
 from ...glossary.models import GlossaryTermLink
 from ...semantic_query.dependencies import metric_contract_repository
 from ...semantic_query.services.contracts import contract_is_approved_current, metric_contract_hash
+from ...semantic_query.services.metric_review import metric_query_defaults_for
 from ...superset.services.datasets import get_dataset
 from ...superset.services.users import user_names
 from ..dependencies import (
@@ -101,7 +102,8 @@ class ExpertRuleAPI(RestApi):
                 if dataset
                 else None
             )
-            if dataset and metric and contract_is_approved_current(contract, dataset, metric):
+            defaults = metric_query_defaults_for(dataset.id, metric_id) if dataset and metric else None
+            if dataset and metric and contract_is_approved_current(contract, dataset, metric, defaults):
                 return type(
                     "MetricLink",
                     (),
@@ -109,7 +111,7 @@ class ExpertRuleAPI(RestApi):
                         "status": contract.status,
                         "is_current": True,
                         "dataset_id": dataset.id,
-                        "expression_hash": metric_contract_hash(dataset, metric),
+                        "expression_hash": metric_contract_hash(dataset, metric, defaults),
                     },
                 )()
         return None

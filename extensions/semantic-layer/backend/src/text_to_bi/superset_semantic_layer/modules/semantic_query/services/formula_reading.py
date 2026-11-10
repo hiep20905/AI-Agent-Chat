@@ -117,6 +117,18 @@ def _row_kind_value(node: Any, vocabulary: FormulaVocabulary) -> str | None:
     return None
 
 
+def formula_row_kinds(formula: ContractMetricFormula, row_kind_column: str | None) -> set[str]:
+    """The row kinds the formula's conditions select, such as {"DU_BAO_NGAY"}; empty when it counts every kind."""
+    vocabulary = FormulaVocabulary(row_kind_column=row_kind_column)
+    terms = [formula.numerator, *([formula.denominator] if formula.denominator else [])]
+    return {
+        row_kind
+        for term in terms
+        for node in _conjuncts(term.condition)
+        if (row_kind := _row_kind_value(node, vocabulary))
+    }
+
+
 def _row_filter(node: Any, vocabulary: FormulaVocabulary) -> str:
     told = _told(node, vocabulary)
     row_kind = _row_kind_value(node, vocabulary)

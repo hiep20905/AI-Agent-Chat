@@ -68,3 +68,12 @@ class MetricDefinition(AuditedModel):
     business_definition = Column(Text, nullable=False)
     unit = Column(String(64), nullable=True)
     steward_id = Column(Integer, ForeignKey("ab_user.id", ondelete="SET NULL"), nullable=True, index=True)
+    # How the metric is read unless a query says otherwise (services/query_defaults.py). They are part of what the
+    # metric means: changing them voids its approval like a formula edit.
+    grain = Column(String(16), nullable=True)
+    row_kind_value = Column(String(255), nullable=True)
+    time_column = Column(String(255), nullable=True)
+    time_window = Column(String(32), nullable=True)
+    time_anchor = Column(String(16), nullable=True)
+    # JSON array of {column, operator, value}.
+    default_filters = Column(Text, nullable=True)

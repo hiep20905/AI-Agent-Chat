@@ -72,6 +72,9 @@ export const semanticLayerApi = {
   metricDefinition: (datasetId: number, metricId: number) => (
     `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/metrics/${encodeURIComponent(metricId)}/definition`
   ),
+  metricQueryDefaults: (datasetId: number, metricId: number) => (
+    `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/metrics/${encodeURIComponent(metricId)}/query-defaults`
+  ),
   metricContractExecute: (datasetId: number, metricId: number) => (
     `${SEMANTIC_LAYER_API}/dataset/${encodeURIComponent(datasetId)}/metrics/${encodeURIComponent(metricId)}/semantic-query/execute`
   ),

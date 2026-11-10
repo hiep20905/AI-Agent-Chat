@@ -14,11 +14,14 @@ def build_semantic_catalog(
     can_access: Callable[[Any], bool],
     max_rows: int,
     metric_details: Callable[[int, int], Mapping[str, Any]] | None = None,
+    query_defaults: Mapping[tuple[int, int], Any] | None = None,
 ) -> dict[str, Any]:
     """Return approved current metadata only for datasets accessible to the caller.
 
     ``metric_details(dataset_id, metric_id)`` adds governed business context, such as the business definition and the
     glossary terms naming the metric, to each visible metric. It never receives a metric the caller may not see.
+    ``query_defaults`` holds each metric's grain, time anchor and default filters (``MetricQueryDefaults``) by
+    (dataset ID, metric ID): they are part of what was approved, and execution applies them unless the caller overrides.
     """
     access: dict[int, bool] = {}
 
@@ -34,7 +37,8 @@ def build_semantic_catalog(
         if dataset is None or not allowed(dataset):
             continue
         metric = next((item for item in getattr(dataset, "metrics", []) if item.id == contract.metric_id), None)
-        if metric is None or not contract_is_approved_current(contract, dataset, metric):
+        defaults = (query_defaults or {}).get((dataset.id, contract.metric_id))
+        if metric is None or not contract_is_approved_current(contract, dataset, metric, defaults):
             continue
         catalog.setdefault(dataset.id, {"id": dataset.id, "name": dataset.table_name, "metrics": [], "dimensions": []})[
             "metrics"
@@ -45,6 +49,7 @@ def build_semantic_catalog(
                 "verbose_name": getattr(metric, "verbose_name", None),
                 "description": getattr(metric, "description", None),
                 "d3format": getattr(metric, "d3format", None),
+                "query_defaults": defaults.as_dict() if defaults else None,
                 **(metric_details(dataset.id, metric.id) if metric_details else {}),
             }
         )

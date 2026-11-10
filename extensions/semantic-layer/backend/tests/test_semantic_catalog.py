@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from text_to_bi.superset_semantic_layer.modules.semantic_query.services.catalog import build_semantic_catalog
 from text_to_bi.superset_semantic_layer.modules.semantic_query.services.contracts import metric_contract_hash
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.query_defaults import MetricQueryDefaults
 from text_to_bi.superset_semantic_layer.modules.semantic_query.services.relationships import (
     RelationshipEnd,
     relationship_contract_hash,
@@ -59,6 +60,7 @@ def test_catalog_hides_inaccessible_stale_and_sensitive_contract_details():
                     "verbose_name": "Average",
                     "description": "Safe",
                     "d3format": None,
+                    "query_defaults": None,
                 }
             ],
             "dimensions": [
@@ -164,9 +166,29 @@ def test_catalog_adds_business_context_only_to_visible_metrics():
             "verbose_name": "Max",
             "description": None,
             "d3format": ",.1f",
+            "query_defaults": None,
             "business_definition": "Highest daily temperature.",
             "unit": "°C",
             "glossary_terms": [],
         }
     ]
     assert "MAX(" not in str(result)
+
+
+def test_catalog_lists_query_defaults_and_drops_a_metric_whose_defaults_changed_after_approval():
+    metric = SimpleNamespace(id=19, metric_name="rain", expression="SUM(rain_mm)", verbose_name=None, description=None)
+    rain = SimpleNamespace(
+        column_name="rain_mm", is_active=True, expression=None, groupby=False, filterable=True, type="FLOAT"
+    )
+    dataset = _dataset(7, "weather", [rain], [metric])
+    approved = MetricQueryDefaults(grain="day", time_column="ngay", time_window="last_7_day", time_anchor="now")
+    expression_hash = metric_contract_hash(dataset, metric, approved)
+    contract = SimpleNamespace(dataset_id=7, metric_id=19, status="approved", expression_hash=expression_hash)
+
+    current = build_semantic_catalog({7: dataset}, [contract], [], lambda _: True, 1000, None, {(7, 19): approved})
+    edited = MetricQueryDefaults(grain="week", time_column="ngay", time_window="last_7_day", time_anchor="now")
+    changed = build_semantic_catalog({7: dataset}, [contract], [], lambda _: True, 1000, None, {(7, 19): edited})
+
+    listed = current["datasets"][0]["metrics"][0]["query_defaults"]
+    assert listed["grain"] == "day" and listed["time_window"] == "last_7_day" and listed["default_filters"] == []
+    assert changed["datasets"] == []

@@ -4,7 +4,7 @@ from superset.connectors.sqla.models import SqlaTable
 
 from ....core.security import can_access_dataset
 from ...semantic_query.services.contracts import contract_is_approved_current
-from ...semantic_query.services.metric_review import metric_contract_for
+from ...semantic_query.services.metric_review import metric_contract_for, metric_query_defaults_for
 from ...superset.services.datasets import get_dataset
 from ..dependencies import glossary_term_link_repository, glossary_term_revision_repository
 from ..models import GlossaryTermLink
@@ -25,7 +25,8 @@ def glossary_link_target(link: GlossaryTermLink, dataset: SqlaTable) -> Any | No
 
 def glossary_metric_approved(dataset: SqlaTable, metric: Any) -> bool:
     """A term builds on a metric only while the metric's contract is approved for its current formula."""
-    return contract_is_approved_current(metric_contract_for(dataset.id, metric.id), dataset, metric)
+    contract = metric_contract_for(dataset.id, metric.id)
+    return contract_is_approved_current(contract, dataset, metric, metric_query_defaults_for(dataset.id, metric.id))
 
 
 def discoverable_glossary_terms() -> list[dict[str, Any]]:
