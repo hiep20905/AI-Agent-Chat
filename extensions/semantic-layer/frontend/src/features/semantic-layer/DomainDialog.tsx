@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { requestJson, semanticLayerApi } from './api';
 import { getDatasetName } from './datasets';
-import type { BusinessDomain, DashboardDataset } from './types';
+import type { BusinessDomain, DashboardDataset, DatasetDictionary } from './types';
 
 export const DOMAIN_COLORS = ['#2563eb', '#0d9488', '#d97706', '#db2777', '#7c3aed', '#059669', '#dc2626', '#0891b2'];
 export const COLOR_NAMES: Record<string, string> = {
@@ -34,13 +34,15 @@ type DomainDialogProps = {
   domain: BusinessDomain | null;
   /** Datasets grouped by their data-dictionary layer, in flow order. */
   groups: Array<{ label: string; datasets: DashboardDataset[] }>;
+  /** Whether each dataset is a base or an aggregate table in the Data Dictionary. */
+  datasetTypeOf: (datasetId: number) => DatasetDictionary['dataset_type'];
   usedColors: string[];
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
 };
 
 /** Creates or edits a business domain: its name, description, colour and member tables. */
-export function DomainDialog({ open, domain, groups, usedColors, onOpenChange, onSaved }: DomainDialogProps) {
+export function DomainDialog({ open, domain, groups, datasetTypeOf, usedColors, onOpenChange, onSaved }: DomainDialogProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [color, setColor] = useState(DOMAIN_COLORS[0]);
@@ -110,7 +112,9 @@ export function DomainDialog({ open, domain, groups, usedColors, onOpenChange, o
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{domain ? 'Sửa nghiệp vụ' : 'Thêm nghiệp vụ'}</DialogTitle>
-          <DialogDescription>Gom các bảng theo nghiệp vụ. Một bảng có thể thuộc nhiều nghiệp vụ.</DialogDescription>
+          <DialogDescription>
+            Gom các bảng base và bảng Aggregate tổng hợp từ chúng theo nghiệp vụ. Một bảng có thể thuộc nhiều nghiệp vụ.
+          </DialogDescription>
         </DialogHeader>
         <FieldGroup>
           <Field>
@@ -151,6 +155,7 @@ export function DomainDialog({ open, domain, groups, usedColors, onOpenChange, o
                     <label key={dataset.id} className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 hover:bg-accent">
                       <Checkbox checked={datasetIds.includes(dataset.id)} onCheckedChange={checked => toggleDataset(dataset.id, checked)} />
                       <span className="truncate">{getDatasetName(dataset)}</span>
+                      {datasetTypeOf(dataset.id) === 'aggregate' ? <span className="sl-model-aggregate" title="Bảng Aggregate">Agg</span> : null}
                     </label>
                   ))}
                 </div>

@@ -114,7 +114,13 @@ type TableData = {
   layerName: string | null;
   layerColor: string | null;
   sharedCount: number;
+  datasetType: DatasetDictionary['dataset_type'];
 };
+
+/** The badge that sets an aggregate table apart from the base tables it is built from. */
+function AggregateBadge({ data }: { data: TableData }) {
+  return data.datasetType === 'aggregate' ? <span className="sl-model-aggregate" title="Bảng Aggregate">Agg</span> : null;
+}
 /** A lineage card: the table, its lane, the columns it lists (see lineageCard) and the dataset's metrics. */
 type LineageCardData = TableData & {
   datasetId: number;
@@ -242,6 +248,7 @@ function LineageTableNode({ id, data }: NodeProps<Node<LineageCardData>>) {
           <strong>{data.title}</strong>
           <code>{data.tableName}</code>
         </span>
+        <AggregateBadge data={data} />
         {data.sharedCount > 1 ? <span className="sl-model-shared" title={`Dùng chung cho ${data.sharedCount} nghiệp vụ`}>×{data.sharedCount}</span> : null}
       </div>
       {columns.map(column => (
@@ -345,13 +352,16 @@ function LevelNode({ data }: NodeProps<Node<LevelData>>) {
 function TableTile({ data }: NodeProps<Node<TableData>>) {
   return (
     <div
-      className="sl-model-tile"
-      title={`${data.title}\n${data.tableName} · ${data.layerName ?? 'Chưa phân tầng'}`}
+      className={`sl-model-tile${data.datasetType === 'aggregate' ? ' is-aggregate' : ''}`}
+      title={`${data.title}\n${data.tableName} · ${data.layerName ?? 'Chưa phân tầng'} · ${data.datasetType === 'aggregate' ? 'Aggregate' : 'Base'}`}
       style={data.layerColor ? { '--layer-color': data.layerColor } as React.CSSProperties : undefined}
     >
       <span className="sl-model-tile-top">
         <span className="sl-model-table-icon"><Table2 /></span>
-        {data.sharedCount > 1 ? <span className="sl-model-shared" title={`Dùng chung cho ${data.sharedCount} nghiệp vụ`}>×{data.sharedCount}</span> : null}
+        <span className="sl-model-tile-marks">
+          <AggregateBadge data={data} />
+          {data.sharedCount > 1 ? <span className="sl-model-shared" title={`Dùng chung cho ${data.sharedCount} nghiệp vụ`}>×{data.sharedCount}</span> : null}
+        </span>
       </span>
       <strong>{data.title}</strong>
       <code>{data.tableName}</code>
@@ -982,12 +992,14 @@ function BusinessFlow({ themeMode, databaseId, datasets, dictionaries, focusData
   const domains = model?.domains ?? [];
   const layers = model?.layers ?? [];
   const layerIdOf = useCallback((datasetId: number) => model?.classifications[String(datasetId)]?.layer_id ?? null, [model]);
-  // The business view groups base tables only; aggregate and not-yet-classified tables stay out of the domains.
-  const baseDatasets = useMemo(
-    () => datasets.filter(dataset => model?.classifications[String(dataset.id)]?.dataset_type === 'base'),
-    [datasets, model],
+  const datasetTypeOf = useCallback(
+    (datasetId: number) => model?.classifications[String(datasetId)]?.dataset_type ?? null,
+    [model],
   );
-  const baseIds = useMemo(() => new Set(baseDatasets.map(dataset => dataset.id)), [baseDatasets]);
+  // The business view groups the base tables and the aggregate tables built from them; tables not classified yet in
+  // the Data Dictionary stay out of the domains.
+  const modelDatasets = useMemo(() => datasets.filter(dataset => datasetTypeOf(dataset.id) !== null), [datasets, datasetTypeOf]);
+  const modelIds = useMemo(() => new Set(modelDatasets.map(dataset => dataset.id)), [modelDatasets]);
   const domainCountByDataset = useMemo(() => {
     const counts = new Map<number, number>();
     for (const domain of domains) for (const id of domain.dataset_ids) counts.set(id, (counts.get(id) ?? 0) + 1);
@@ -1090,10 +1102,10 @@ function BusinessFlow({ themeMode, databaseId, datasets, dictionaries, focusData
       showGrid(before);
       return;
     }
-    const settled = reconcileGrid(next, model.domains, baseDatasets.map(dataset => dataset.id));
+    const settled = reconcileGrid(next, model.domains, modelDatasets.map(dataset => dataset.id));
     showGrid(validGrid(settled) ? settled : next);
     saveGrid(gridRef.current);
-  }, [model, baseDatasets, showGrid, saveGrid]);
+  }, [model, modelDatasets, showGrid, saveGrid]);
 
   // Dragging from a domain cell adds the cells after it, one at a time along its row or column, and dragging back
   // takes them away again. Dragging a cell's outer edge inwards removes that cell.
@@ -1205,6 +1217,7 @@ function BusinessFlow({ themeMode, databaseId, datasets, dictionaries, focusData
       layerName: layer?.name ?? null,
       layerColor: layer?.color ?? null,
       sharedCount: domainCountByDataset.get(datasetId) ?? 0,
+      datasetType: datasetTypeOf(datasetId),
     };
   };
 
@@ -1212,7 +1225,7 @@ function BusinessFlow({ themeMode, databaseId, datasets, dictionaries, focusData
   useEffect(() => {
     if (!model) return;
     if (mode === 'business') {
-      const ids = baseDatasets.map(dataset => dataset.id);
+      const ids = modelDatasets.map(dataset => dataset.id);
       // The canvas keeps the cells the user gave domains and tables, on screen or else as stored in the backend; a
       // first or inconsistent layout starts afresh.
       if (gridRef.current.domains.length === 0 && model.canvas) {
@@ -1797,9 +1810,8 @@ function BusinessFlow({ themeMode, databaseId, datasets, dictionaries, focusData
 
   const selectedDomains = domains.filter(domain => selectedDomainIds.includes(domain.id));
   const assignedIds = new Set(domains.flatMap(domain => domain.dataset_ids));
-  const unassignedCount = baseDatasets.filter(dataset => !assignedIds.has(dataset.id)).length;
-  const aggregateCount = datasets.filter(dataset => model?.classifications[String(dataset.id)]?.dataset_type === 'aggregate').length;
-  const unclassifiedCount = datasets.length - baseDatasets.length - aggregateCount;
+  const unassignedCount = modelDatasets.filter(dataset => !assignedIds.has(dataset.id)).length;
+  const unclassifiedCount = datasets.length - modelDatasets.length;
 
   return (
     <div className={`sl-model-workspace${panelCollapsed ? ' is-panel-collapsed' : ''}`}>
@@ -1829,19 +1841,17 @@ function BusinessFlow({ themeMode, databaseId, datasets, dictionaries, focusData
               <Checkbox aria-label={`Chọn ${domain.name}`} checked={selectedDomainIds.includes(domain.id)} onCheckedChange={() => toggleDomain(domain.id)} />
               <span className="sl-model-domain-dot" style={{ background: domain.color || UNASSIGNED_COLOR }} />
               <button type="button" className="sl-model-domain-name" title={domain.description ?? domain.name} onClick={() => toggleDomain(domain.id)}>{domain.name}</button>
-              <span className="sl-model-domain-count">{domain.dataset_ids.filter(id => baseIds.has(id)).length}</span>
+              <span className="sl-model-domain-count">{domain.dataset_ids.filter(id => modelIds.has(id)).length}</span>
               <Button size="icon-xs" variant="ghost" aria-label={`Sửa ${domain.name}`} onClick={() => editDomain(domain)}><Pencil /></Button>
             </div>
           ))}
           {!loading && domains.length === 0 ? <p className="sl-empty">Chưa có nghiệp vụ. Bấm Thêm để gom các bảng theo nghiệp vụ.</p> : null}
         </div>
-        {unassignedCount > 0 ? <p className="sl-model-unassigned">{unassignedCount} bảng base chưa thuộc nghiệp vụ nào</p> : null}
-        {model && (aggregateCount > 0 || unclassifiedCount > 0) ? (
+        {unassignedCount > 0 ? <p className="sl-model-unassigned">{unassignedCount} bảng chưa thuộc nghiệp vụ nào</p> : null}
+        {model && unclassifiedCount > 0 ? (
           <p className="sl-model-unassigned">
-            View nghiệp vụ chỉ hiện bảng Base. Đang ẩn
-            {aggregateCount > 0 ? ` ${aggregateCount} bảng Aggregate` : ''}
-            {aggregateCount > 0 && unclassifiedCount > 0 ? ' và' : ''}
-            {unclassifiedCount > 0 ? ` ${unclassifiedCount} bảng chưa phân loại Classification trong Data Dictionary` : ''}.
+            View nghiệp vụ hiện bảng Base và bảng Aggregate. Đang ẩn {unclassifiedCount} bảng chưa phân loại
+            Classification trong Data Dictionary.
           </p>
         ) : null}
         <div className="sl-model-panel-footer">
@@ -2018,7 +2028,8 @@ function BusinessFlow({ themeMode, databaseId, datasets, dictionaries, focusData
       <DomainDialog
         open={dialog.open}
         domain={dialog.domain}
-        groups={groupDatasetsByLayer(baseDatasets, layers, layerIdOf)}
+        groups={groupDatasetsByLayer(modelDatasets, layers, layerIdOf)}
+        datasetTypeOf={datasetTypeOf}
         usedColors={domains.map(domain => domain.color ?? '')}
         onOpenChange={open => setDialog(current => ({ ...current, open }))}
         onSaved={() => void loadModel()}

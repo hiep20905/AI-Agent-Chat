@@ -41,6 +41,13 @@ each group as a collapsible section, with the ungrouped members last under "Chư
   `.../groups/<group_id>`. The admin lists (`GET .../glossary`, `GET .../expert-rules`) return `groups` and each
   member's `group`.
 
+## Semantic Model: base and aggregate tables
+
+The business view of the Semantic Model groups both the base tables (`dm_*`, `tb_*`) and the aggregate tables built
+from them (the dashboard `dim_*` / `fact_*` tables and the virtual datasets the AI Agent proposes) by business domain.
+The Data Dictionary's classification decides the role: an aggregate tile has a dashed border and an `Agg` badge, and
+tables not classified yet stay out of the view with a note. The domain dialog lists both kinds.
+
 ## Consumer API
 
 Approved content reaches any consumer, such as a Text to BI agent, through read-only endpoints. Each returns only

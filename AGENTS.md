@@ -203,6 +203,9 @@ event, and deleting a group leaves its members ungrouped (see the extension
 README). Opening the Semantic Layer as an administrator creates these tables
 and seeds dictionary rows from the existing Superset datasets.
 
+The Semantic Model's business view groups both base and aggregate datasets by
+business domain; datasets not classified in the Data Dictionary stay out of it.
+
 ## Code style
 
 The full rules are in `docs/handbook/quy-uoc-code.md`. In short, for Python and

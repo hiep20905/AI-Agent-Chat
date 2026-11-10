@@ -1009,6 +1009,18 @@
 }
 .sl-model-canvas .react-flow__node.dragging .sl-model-tile { cursor: grabbing; box-shadow: 0 6px 16px rgb(0 0 0 / 14%); }
 .sl-model-tile-top { display: flex; align-items: flex-start; justify-content: space-between; }
+.sl-model-tile-marks { display: flex; align-items: center; gap: 3px; }
+/* Aggregate tables: a dashed border and an "Agg" badge set them apart from the base tables they are built from. */
+.sl-model-tile.is-aggregate { border-style: dashed; border-color: color-mix(in srgb, #7c3aed 55%, var(--sl-border)); }
+.sl-model-aggregate {
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #7c3aed;
+  background: color-mix(in srgb, #7c3aed 12%, var(--sl-surface-raised));
+  font-size: 10px;
+  font-weight: 700;
+}
 .sl-model-tile .sl-model-table-icon { width: 26px; height: 26px; border-radius: 6px; }
 .sl-model-tile .sl-model-table-icon svg { width: 14px; height: 14px; }
 .sl-model-tile strong {
