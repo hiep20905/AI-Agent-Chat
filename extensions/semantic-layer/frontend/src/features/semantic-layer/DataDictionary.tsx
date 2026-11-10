@@ -12,6 +12,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -93,6 +94,7 @@ const editableFields: Array<keyof Omit<ColumnDictionary, 'id' | 'column_name'>> 
   'aggregations',
   'synonyms',
   'description',
+  'contains_pii',
 ];
 
 type DictionaryTab = 'columns' | 'general' | 'time' | 'relationships' | 'indicators';
@@ -141,6 +143,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
     layer_id: null as number | null,
     timeSemantics: JSON.stringify({ time_column: null, row_kind_column: null, grains: [] }),
     indicatorModel: 'null',
+    contains_pii: false,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -166,6 +169,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
     || dictionary.create_column !== datasetBaseline.create_column
     || dictionary.dataset_type !== datasetBaseline.dataset_type
     || dictionary.layer_id !== datasetBaseline.layer_id
+    || (dictionary.contains_pii ?? false) !== datasetBaseline.contains_pii
   );
   const timeDirty = dictionary !== null && JSON.stringify(timeSemanticsOf(dictionary)) !== datasetBaseline.timeSemantics;
   const indicatorDirty = dictionary !== null
@@ -222,6 +226,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
         layer_id: payload.layer_id ?? null,
         timeSemantics: JSON.stringify(timeSemanticsOf(payload)),
         indicatorModel: JSON.stringify(payload.indicator_model ?? null),
+        contains_pii: payload.contains_pii ?? false,
       });
     } catch (reason) {
       if ((reason as Error).name !== 'AbortError') {
@@ -282,7 +287,9 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
     });
   };
 
-  const updateDataset = <K extends 'display_name' | 'description' | 'grain' | 'create_column' | 'dataset_type' | 'layer_id'>(
+  const updateDataset = <
+    K extends 'display_name' | 'description' | 'grain' | 'create_column' | 'dataset_type' | 'layer_id' | 'contains_pii',
+  >(
     field: K,
     value: DatasetDictionary[K],
   ) => {
@@ -460,6 +467,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
             row_kind_column: dictionary.row_kind_column,
             grains: dictionary.grains.map(item => ({ ...item, label: normalizeNullableText(item.label?.trim() ?? '') })),
             indicator_model: dictionary.indicator_model ?? null,
+            contains_pii: dictionary.contains_pii ?? false,
           },
           columns: columns.map(({ column_name, ...column }) => ({
             column_name,
@@ -484,6 +492,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
         layer_id: payload.layer_id ?? null,
         timeSemantics: JSON.stringify(timeSemanticsOf(payload)),
         indicatorModel: JSON.stringify(payload.indicator_model ?? null),
+        contains_pii: payload.contains_pii ?? false,
       });
       setSaved(true);
       onSaved(payload);
@@ -602,6 +611,15 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
                 </SelectContent>
               </Select>
             </Field>
+            <Field orientation="horizontal" className="sl-field-wide">
+              <Checkbox
+                id="sl-dataset-contains-pii" checked={dictionary.contains_pii ?? false} disabled={readOnly || saving}
+                onCheckedChange={checked => updateDataset('contains_pii', checked)}
+              />
+              <FieldLabel htmlFor="sl-dataset-contains-pii" title="Bảng chứa dữ liệu cá nhân như họ tên, số điện thoại, email">
+                Chứa dữ liệu nhạy cảm (PII)
+              </FieldLabel>
+            </Field>
             <Field>
               <FieldLabel title="Cột ghi nhận thời điểm tạo bản ghi, dùng để lọc theo thời gian">Cột thời gian tạo</FieldLabel>
               <Select items={createColumnItems} value={dictionary.create_column} disabled={readOnly || saving} onValueChange={value => updateDataset('create_column', value)}>
@@ -663,6 +681,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
                 <th scope="col">Vai trò</th>
                 <th scope="col">Business term</th>
                 <th scope="col">Khóa</th>
+                <th scope="col" title="Chứa dữ liệu nhạy cảm (PII)">PII</th>
               </tr>
             </thead>
             <tbody>
@@ -685,6 +704,7 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
                         <code title={column.column_name}>{column.column_name}</code>
                         <span className="sl-type-badge" title={column.data_type}>{column.data_type}</span>
                         {column.temporal_kind ? <span className="sl-type-badge is-temporal">{TEMPORAL_KIND_LABELS[column.temporal_kind]}</span> : null}
+                        {column.contains_pii ? <span className="sl-type-badge is-pii" title="Chứa dữ liệu nhạy cảm (PII)">PII</span> : null}
                       </th>
                       <td><Input aria-label={`Display name của ${column.column_name}`} disabled={disabled} value={column.display_name} onChange={event => updateColumn(column.column_name, 'display_name', event.target.value)} /></td>
                       <td>
@@ -715,11 +735,18 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
                         </div>
                         {reference ? <span className="sl-key-reference" title={reference}>→ {reference}</span> : null}
                       </td>
+                      <td className="sl-pii-cell">
+                        <Checkbox
+                          aria-label={`${column.column_name} chứa dữ liệu nhạy cảm (PII)`} disabled={disabled}
+                          checked={column.contains_pii ?? false}
+                          onCheckedChange={checked => updateColumn(column.column_name, 'contains_pii', checked)}
+                        />
+                      </td>
                     </tr>
                     {expanded ? (
                       <tr className="sl-column-details-row" id={detailsId}>
                         <td />
-                        <td colSpan={5}>
+                        <td colSpan={6}>
                           <div className="sl-column-semantics">
                             <label className="sl-column-detail">
                               Mô tả
@@ -797,6 +824,13 @@ export function DataDictionary({ dataset, layers, onDirtyChange, onSaved, onMana
                               </Select>
                             </label>
                             <label className="sl-column-detail is-check"><input aria-label={`${column.column_name} nullable`} disabled={disabled} type="checkbox" checked={column.nullable} onChange={event => updateColumn(column.column_name, 'nullable', event.target.checked)} />Nullable</label>
+                            <label className="sl-column-detail is-check">
+                              <Checkbox
+                                aria-label={`${column.column_name} là PII`} disabled={disabled} checked={column.contains_pii ?? false}
+                                onCheckedChange={checked => updateColumn(column.column_name, 'contains_pii', checked)}
+                              />
+                              PII
+                            </label>
                           </div>
                         </td>
                       </tr>

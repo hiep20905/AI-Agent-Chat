@@ -336,6 +336,8 @@ export type ColumnDictionary = {
   aggregations: Aggregation[];
   synonyms: string[];
   description: string | null;
+  /** Whether the column holds personal data (PII). */
+  contains_pii?: boolean;
 };
 
 export type TemporalKind = 'date' | 'timestamp';
@@ -499,6 +501,8 @@ export type DatasetDictionary = {
   indicator_model: IndicatorModel | null;
   columns: ColumnDictionary[];
   read_only?: boolean;
+  /** Whether the table holds personal data (PII). */
+  contains_pii?: boolean;
 };
 
 /**

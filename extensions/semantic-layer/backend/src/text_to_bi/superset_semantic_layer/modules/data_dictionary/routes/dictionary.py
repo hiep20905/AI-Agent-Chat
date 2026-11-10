@@ -39,6 +39,7 @@ from ..services.indicators import (
     read_indicators,
     stored_indicator_model,
 )
+from ..services.pii import checked_pii_flag
 from ..services.seeding import seed_dictionary
 from ..services.time_semantics import (
     build_grain_profile_payload,
@@ -314,6 +315,8 @@ class DataDictionaryRoutes:
             isinstance(layer_id, bool) or not isinstance(layer_id, int) or data_layer_repository().get(layer_id) is None
         ):
             raise DataDictionaryValidationError("dataset.layer_id must reference an existing data layer or be null.")
+        if "contains_pii" in dataset_updates:
+            dataset_updates["contains_pii"] = checked_pii_flag(dataset_updates["contains_pii"], "dataset.contains_pii")
 
         try:
             # Seed first: each seed commits, so it must not run between the updates below and their commit.

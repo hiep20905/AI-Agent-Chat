@@ -17,6 +17,7 @@ from ...data_dictionary.dependencies import (
     dataset_dictionary_repository,
     dataset_grain_repository,
 )
+from ...data_dictionary.services.catalog_pii import label_catalog_pii
 from ...data_dictionary.services.indicators import read_indicators, stored_indicator_model
 from ...data_dictionary.services.seeding import seed_dictionary
 from ...glossary.services.discovery import discoverable_glossary_terms
@@ -152,6 +153,7 @@ class ConsumerRoutes:
             metric_query_defaults_on(datasets),
         )
         label_dimensions(catalog["datasets"])
+        label_catalog_pii(catalog["datasets"])
         return self.response(200, **catalog)
 
     @staticmethod

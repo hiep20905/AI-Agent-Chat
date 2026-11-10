@@ -177,6 +177,7 @@ def _route_api(datasets):
         "current_app": SimpleNamespace(config={}),
         "ensure_dictionary_tables": lambda: None,
         "label_dimensions": len,
+        "label_catalog_pii": len,
         "AGENT_ORIGIN": "ai_agent",
         "metric_is_eligible_for_contract": metric_is_eligible_for_contract,
         "metric_contract_hash": metric_contract_hash,

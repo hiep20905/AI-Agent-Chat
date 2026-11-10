@@ -11,11 +11,13 @@ from ..exceptions import DataDictionaryValidationError
 from ..models import ColumnDictionary, DatasetDictionary
 from .column_semantics import checked_column_semantics
 from .indicators import stored_indicator_model
+from .pii import checked_pii_flag
 from .time_semantics import checked_temporal_kind
 
 DICTIONARY_FIELDS = {
     "aggregations",
     "business_term",
+    "contains_pii",
     "default_value",
     "description",
     "display_name",
@@ -39,6 +41,7 @@ OPTIONAL_STRING_FIELD_LIMITS = {"format": 128, "unit": 128}
 
 DATASET_DICTIONARY_FIELDS = {
     "display_name", "description", "grain", "create_column", "dataset_type", "layer_id", "indicator_model",
+    "contains_pii",
 }
 
 # Saved together: the grains are checked against the time column and the column telling kinds of rows apart.
@@ -171,6 +174,8 @@ def validate_dictionary_payload(payload: Any, actual_column_names: set[str], dat
             values["temporal_kind"] = checked_temporal_kind(item["temporal_kind"], index)
         # The stored role is not known here; the save clears aggregations on a column that ends up not a measure.
         values.update(checked_column_semantics(item, index, item.get("semantic_role")))
+        if "contains_pii" in item:
+            values["contains_pii"] = checked_pii_flag(item["contains_pii"], f"columns[{index}].contains_pii")
         normalized.append(values)
     return normalized
 
@@ -218,6 +223,7 @@ def serialize_dictionary(
         "time_column": dictionary.time_column,
         "row_kind_column": dictionary.row_kind_column,
         "indicator_model": stored_indicator_model(dictionary.indicator_model),
+        "contains_pii": bool(dictionary.contains_pii),
         "grains": [
             {"row_kind_value": item.row_kind_value, "label": item.label, "grain": item.grain} for item in grains
         ],
@@ -242,6 +248,7 @@ def serialize_dictionary(
                 "aggregations": json_list(records[actual.column_name].aggregations),
                 "synonyms": json_list(records[actual.column_name].synonyms),
                 "description": records[actual.column_name].description,
+                "contains_pii": bool(records[actual.column_name].contains_pii),
             }
             for actual in dataset.columns
         ],

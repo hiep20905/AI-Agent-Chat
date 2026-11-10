@@ -409,6 +409,13 @@ def _migrate_dictionary_tables():
                     text(f"ALTER INDEX {old_index_name} RENAME TO ix_text_to_bi_column_dictionary_dataset_id")
                 )
 
+    with db.engine.begin() as connection:
+        # A dataset and a column each may be marked as holding personal data (PII); rows from before are not.
+        for table in (DatasetDictionary.__tablename__, ColumnDictionary.__tablename__):
+            table_columns = {column["name"] for column in inspect(connection).get_columns(table)}
+            if "contains_pii" not in table_columns:
+                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN contains_pii BOOLEAN NOT NULL DEFAULT FALSE"))
+
 
 def _add_group_columns(postgres: bool) -> None:
     """Give terms and rules created before groups existed a group column, and let their audit trails record moves."""

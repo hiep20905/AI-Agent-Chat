@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, UniqueConstraint, false
 from sqlalchemy.orm import relationship
 
 from ....common.base_model import AuditedModel
@@ -41,6 +41,8 @@ class ColumnDictionary(AuditedModel):
     aggregations = Column(Text, nullable=True)
     synonyms = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
+    # Whether the column holds personal data (PII) that consumers must treat as sensitive.
+    contains_pii = Column(Boolean, nullable=False, default=False, server_default=false())
 
     referenced_column_record = relationship(
         "ColumnDictionary",

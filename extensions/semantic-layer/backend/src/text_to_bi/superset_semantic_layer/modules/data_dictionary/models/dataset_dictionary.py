@@ -1,4 +1,4 @@
-from sqlalchemy import Column, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text, false
 
 from ....common.base_model import AuditedModel
 
@@ -20,3 +20,5 @@ class DatasetDictionary(AuditedModel):
     # For a table that keeps one value per indicator, or the table naming the indicators: JSON, see
     # modules/data_dictionary/indicators.py.
     indicator_model = Column(Text, nullable=True)
+    # Whether the table holds personal data (PII) that consumers must treat as sensitive.
+    contains_pii = Column(Boolean, nullable=False, default=False, server_default=false())

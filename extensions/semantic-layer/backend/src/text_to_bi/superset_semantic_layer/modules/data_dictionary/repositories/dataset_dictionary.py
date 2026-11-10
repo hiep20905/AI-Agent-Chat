@@ -51,3 +51,12 @@ class DatasetDictionaryRepository(BaseRepository[DatasetDictionary]):
         self.query().filter(DatasetDictionary.layer_id == layer_id).update(
             {DatasetDictionary.layer_id: None}, synchronize_session=False
         )
+
+    def pii_flags(self, dataset_ids: Iterable[int]) -> dict[int, bool]:
+        """Whether each dataset is marked as holding personal data (PII)."""
+        rows = self.session.execute(
+            select(DatasetDictionary.id, DatasetDictionary.contains_pii).where(
+                DatasetDictionary.id.in_(list(dataset_ids))
+            )
+        ).all()
+        return {dataset_id: bool(contains_pii) for dataset_id, contains_pii in rows}

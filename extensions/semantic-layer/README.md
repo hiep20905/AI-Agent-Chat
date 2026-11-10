@@ -84,6 +84,9 @@ Each catalog metric carries:
 `business_definition`, `unit` and `steward_name` are `null` until an administrator writes the metric's business
 definition. A consumer joins expert rules to metrics through the rule's `metric_ids`.
 
+Each catalog dataset and each of its dimensions also carries `contains_pii`, `true` when the Data Dictionary marks it
+as holding personal data (PII). A column does not inherit its dataset's mark; a consumer checks both.
+
 `query_defaults` (`null` when unset) is how the metric is read unless a query says otherwise: its grain, row kind,
 time column and default time window, counted from now or from the latest data, and its default filters. They are part
 of the reviewed metric: editing them in the Metrics tab leaves an approved metric outdated until it is proposed and
@@ -162,6 +165,16 @@ first time an administrator opens the extension, after Superset's core schema is
 available. Existing column dictionary installations are upgraded from `table_id`
 to `dataset_id` in place, with a dataset dictionary row backfilled for each
 existing dataset reference.
+
+### Personal data (PII)
+
+A dataset dictionary row and a column dictionary row each carry `contains_pii` (boolean, not null, default false),
+which marks a table or column that holds personal data such as names, phone numbers or e-mail addresses. An
+administrator ticks "Chứa dữ liệu nhạy cảm (PII)" in the Data Dictionary's "Thông tin chung" tab for the dataset, and
+the "PII" checkbox in a column's row or details; a marked column shows a "PII" badge. The marks are saved with the
+rest of the dictionary: `GET`/`PUT /dataset/<id>/dictionary` read and write `contains_pii` on the dataset and on each
+column, and a value that is not `true` or `false` is refused with 400. Rows from before the column existed are not
+marked.
 
 ## Build
 
