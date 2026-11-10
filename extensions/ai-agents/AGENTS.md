@@ -128,8 +128,8 @@ numbers, and logs the question so administrators can fill the gaps:
    rule with a condition no filter can express stops the query. A user's
    definition with stored `conditions` is applied the same way and replaces the
    model's filters on its columns. Ranking, the row limit and the comparison run
-   on the agent side, because the execute endpoint takes only dimensions and
-   filters: a comparison needs time filters and no date dimension, and runs every
+   on the agent side, because the execute endpoint takes only dimensions,
+   filters and a time grain: a comparison needs time filters and no date dimension, and runs every
    metric again over the other period, adding `<metric>__compare` columns. The
    requested dates are checked against `time_ranges` (`coverage`: `full`,
    `partial` or `none`), so a period outside the data is told apart from one
@@ -141,6 +141,16 @@ numbers, and logs the question so administrators can fill the gaps:
    labels. A `result` event carries it to the browser before the answer
    streams. A plan the catalog does not allow, or a query the Semantic Layer
    refuses, becomes `query_error` for the answer instead.
+   Each catalog metric carries its approved `query_defaults` (grain, row
+   kind, time column, default time window and default filters), which the
+   Semantic Layer applies itself unless a filter names the same column. The
+   model sees them, so it adds no time filter when the question names no
+   period, and sets `time_grain` only when the question splits time at
+   another unit; `plan_query` sends it only when every metric is split by
+   its own time column, and raises a grain finer than the data to the
+   data's grain with a note. The `applied_defaults` of each answer become
+   the result's `defaults`, and a default time window adds a note naming
+   the period, so the answer says which period it used.
 6. The final answer streams as tokens, written for a business user from the
    numbers in the result: the direct answer first, then the criterion and
    whether it is the business's shared definition or the user's own, "theo dự

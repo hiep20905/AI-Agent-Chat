@@ -27,6 +27,13 @@ QUERY_RULES = """\
 - `comparison`: hỏi so với một kỳ khác ("so với tuần trước", "tăng hay giảm so với tháng trước") thì `filters` giữ
   kỳ đang hỏi, còn `comparison` là kỳ đem so: `start`, `end` dạng "YYYY-MM-DD" và `label` ngắn như "tuần trước".
   Khi so sánh, không nhóm theo cột ngày. Không so sánh thì để null.
+- `query_defaults` của metric là cách đọc đã duyệt: `grain` (gom cột thời gian `time_column` theo đơn vị này),
+  `time_window` và `time_anchor` (khoảng thời gian mặc định, tính từ hiện tại `now` hay từ mốc dữ liệu mới nhất
+  `latest_data`), `row_kind_value` và `default_filters`. Hệ thống tự áp dụng chúng; không chép lại thành bộ lọc. Câu
+  hỏi không nêu khoảng thời gian thì không thêm bộ lọc `time`, để khoảng mặc định được dùng. Bộ lọc của bạn trên cùng
+  một cột sẽ thay mặc định của cột đó.
+- `time_grain`: chỉ khi câu hỏi chia theo thời gian ở đơn vị khác `grain` của metric ("theo giờ", "theo tháng") và
+  `dimensions` có `time_column` của metric; ngược lại để null.
 - `presentation`: `number` cho một con số, `table` cho danh sách, `line` cho diễn biến theo thời gian, `bar` để so sánh
   giữa các nhóm.
 - `scope`: phạm vi bằng lời, ví dụ "Hà Nội, 19/10–25/10/2026"."""
@@ -160,6 +167,8 @@ Khi có `result`:
 - `coverage.status` là `none`: khoảng thời gian hỏi nằm ngoài dữ liệu hiện có; nói rõ dữ liệu có từ `coverage.min` đến
   `coverage.max`, không nói là "không có trường hợp nào". `partial`: nói kết quả chỉ tính phần có dữ liệu.
 - `truncated` là true: Semantic Layer đã cắt bớt dữ liệu; nói kết quả đã được rút gọn.
+- `defaults`: điều kiện mặc định của chỉ số đã được áp dụng (khoảng thời gian, bộ lọc); khi câu hỏi không nêu khoảng
+  thời gian, nói rõ số liệu tính trong khoảng mặc định đó.
 - `rows_omitted` > 0: chỉ là bạn không được xem hết các dòng, người dùng vẫn thấy đủ `total_rows` dòng trong bảng và
   biểu đồ. Không nói kết quả bị rút gọn hay thiếu dòng; chỉ nhận xét trên các dòng bạn thấy, không suy ra cực trị hay
   tổng của toàn bộ.

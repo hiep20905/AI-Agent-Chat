@@ -17,6 +17,9 @@ ROWS_FOR_ANSWER = 60
 NUMERIC_TYPES = ("INT", "NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "REAL", "BIGINT", "SMALLINT")
 TIMESTAMP_TYPES = ("TIMESTAMP", "DATETIME")
 COMPARED_SUFFIX = "__compare"
+# From finest to coarsest, as the Semantic Layer orders a metric's grain.
+GRAINS = ("instant", "hour", "day", "week", "month", "quarter", "year")
+GRAIN_WORDS = {"hour": "giờ", "day": "ngày", "week": "tuần", "month": "tháng", "quarter": "quý", "year": "năm"}
 # Decimal places the answer quotes; the page's result card shows numbers the same way (`maximumFractionDigits: 2`).
 ANSWER_DECIMALS = Decimal("0.01")
 
@@ -39,11 +42,17 @@ class PlannedQuery:
     coverage: dict[str, Any] | None = None
     # Columns holding a time of day, where a filter by date has to cover the whole day.
     timestamp_columns: set[str] = field(default_factory=set)
+    # The grain the metrics' time column is grouped by when it differs from their own; None keeps the metric's grain.
+    time_grain: str | None = None
 
     def request_body(self, compared: bool = False) -> dict[str, Any]:
-        """What the Semantic Layer's execution endpoint accepts: column names and filters, nothing else."""
+        """What the Semantic Layer's execution endpoint accepts: column names, filters and a time grain.
+
+        The Semantic Layer applies each metric's own grain, time window and default filters unless a filter here names
+        the same column.
+        """
         filters = self.comparison["filters"] if compared and self.comparison else self.filters
-        return {
+        body = {
             "dimensions": [dimension["name"] for dimension in self.dimensions],
             "filters": [
                 sent
@@ -51,6 +60,7 @@ class PlannedQuery:
                 for sent in whole_day_filters(item, item["column"] in self.timestamp_columns)
             ],
         }
+        return {**body, "time_grain": self.time_grain} if self.time_grain else body
 
 
 def whole_day_filters(item: dict[str, Any], timestamp: bool) -> list[dict[str, Any]]:
@@ -250,6 +260,29 @@ def _comparison(
     }
 
 
+def _time_grain(
+    asked: Any, metrics: list[dict[str, Any]], dimensions: list[dict[str, Any]]
+) -> tuple[str | None, list[str]]:
+    """The grain to group the metrics' time column by, and a note when the data is coarser than the question.
+
+    Only a grain every metric can take is sent: each metric must declare a time column (its `query_defaults`) that the
+    query is split by; otherwise the metrics keep their own grain.
+    """
+    if asked not in GRAINS[1:]:
+        return None, []
+    dimension_names = {dimension["name"] for dimension in dimensions}
+    defaults = [metric.get("query_defaults") or {} for metric in metrics]
+    if not defaults or any(item.get("time_column") not in dimension_names for item in defaults):
+        return None, []
+    native = [item["native_grain"] for item in defaults if item.get("native_grain") in GRAINS]
+    coarsest = max(native, key=GRAINS.index, default=None)
+    if coarsest and coarsest != "instant" and GRAINS.index(asked) < GRAINS.index(coarsest):
+        names = ", ".join(metric["name"] for metric, item in zip(metrics, defaults) if item.get("native_grain") == coarsest)
+        word = GRAIN_WORDS.get(coarsest, coarsest)
+        return coarsest, [f"{names} chỉ có số liệu theo {word}, nên kết quả được tính theo {word}."]
+    return asked, []
+
+
 def plan_query(
     plan: dict[str, Any] | None,
     catalog_datasets: list[dict[str, Any]],
@@ -332,6 +365,8 @@ def plan_query(
         notes += [note for note in (_coverage_note(compared_coverage, comparison["label"]),) if note]
         comparison["coverage"] = compared_coverage
 
+    time_grain, grain_notes = _time_grain(plan.get("time_grain"), metrics, dimensions)
+    notes += grain_notes
     presentation = plan.get("presentation") if plan.get("presentation") in ("number", "table", "bar", "line") else None
     return PlannedQuery(
         dataset_id=dataset["id"],
@@ -346,6 +381,7 @@ def plan_query(
         comparison=comparison,
         coverage=coverage,
         timestamp_columns={name for name, column in columns.items() if _is_timestamp(column)},
+        time_grain=time_grain,
     )
 
 
@@ -418,6 +454,33 @@ def _ordered(rows: list[dict[str, Any]], planned: PlannedQuery) -> list[dict[str
     return ordered[:planned.limit] if planned.limit else ordered
 
 
+def applied_defaults(planned: PlannedQuery, answers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """What each metric's own defaults added to the query, with a note when a default time window chose the period."""
+    applied = []
+    for metric, answer in zip(planned.metrics, answers):
+        used = answer.get("applied_defaults")
+        if not used:
+            continue
+        entry = {
+            "metric": metric["name"],
+            "filters": [item for item in used.get("filters", []) if item.get("source") != "time_window"],
+            "time_window": used.get("time_window"),
+            "time_grain": used.get("time_grain"),
+        }
+        window = entry["time_window"]
+        if window:
+            end = _iso_date(window.get("end"))
+            # A window ending before midnight of a day ends with the day before it.
+            if end and not window.get("end_included") and _date_only(window.get("end")):
+                end -= timedelta(days=1)
+            start = _iso_date(window.get("start"))
+            if start and end:
+                period = f"từ {_shown_date(start)} đến {_shown_date(end)}"
+                entry["note"] = f"{metric['name']} dùng khoảng thời gian mặc định của chỉ số: {period}."
+        applied.append(entry)
+    return applied
+
+
 def combined_result(
     planned: PlannedQuery, answers: list[dict[str, Any]], compared_answers: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -432,6 +495,8 @@ def combined_result(
     _days_when_daily(found, planned)
     shown = _ordered(found, planned)
     notes = list(planned.notes)
+    defaults = applied_defaults(planned, answers)
+    notes += [item["note"] for item in defaults if item.get("note")]
     if truncated and planned.order:
         notes.append("Semantic Layer đã giới hạn số dòng trả về, nên thứ hạng chỉ tính trên phần dữ liệu đã nhận.")
     compared = planned.comparison is not None and compared_answers is not None
@@ -466,6 +531,8 @@ def combined_result(
             {key: planned.comparison[key] for key in ("label", "start", "end", "coverage")} if compared else None
         ),
         "coverage": planned.coverage,
+        # Each metric's own row kind, default filters, time window and grain the Semantic Layer applied.
+        "defaults": defaults,
         "rows": shown,
         "row_count": len(shown),
         "total_rows": len(found),

@@ -59,6 +59,7 @@ class QueryPlan(BaseModel):
     order_by: QueryOrder | None = None
     limit: int | None = None
     comparison: ComparedPeriod | None = None
+    time_grain: Literal["hour", "day", "week", "month", "quarter", "year"] | None = None
     presentation: Literal["number", "table", "bar", "line"] = "table"
     scope: str = Field(default="", description="Phạm vi bằng lời, ví dụ \"Hà Nội, 19/10–25/10/2026\".")
 
@@ -204,7 +205,7 @@ def _described(items: list[dict[str, Any]], fields: tuple[str, ...]) -> list[dic
 
 TERM_FIELDS = ("id", "name", "synonyms", "definition", "metrics", "columns", "dataset_ids")
 USER_DEFINITION_FIELDS = ("id", "kind", "name", "concept", "definition", "conditions")
-METRIC_FIELDS = ("dataset_id", "metric_id", "name", "definition", "unit", "glossary_term_ids")
+METRIC_FIELDS = ("dataset_id", "metric_id", "name", "definition", "unit", "glossary_term_ids", "query_defaults")
 RULE_FIELDS = ("id", "name", "dataset_id", "conditions", "exceptions", "metric_ids", "glossary_term_ids")
 
 

@@ -80,6 +80,17 @@ def dataset_entry(dataset: dict[str, Any], members: dict[str, Any]) -> dict[str,
     }
 
 
+def query_defaults_entry(defaults: dict[str, Any] | None) -> dict[str, Any] | None:
+    """A metric's grain, time window and default filters without the unset parts; None when it has none.
+
+    The Semantic Layer applies them itself unless the query filters the same column, so the planner only needs to know
+    them to leave a period it does not have to ask for, and to say which one was used.
+    """
+    if not defaults:
+        return None
+    return {key: value for key, value in defaults.items() if value not in (None, "", [])} or None
+
+
 def term_entry(term: dict[str, Any], metric_keys: set[tuple[int, int]]) -> dict[str, Any]:
     """A glossary term with what it names in the data: metrics the caller can query, columns and whole datasets."""
     links = term.get("links") or []
@@ -126,6 +137,7 @@ def flatten_catalog(
             "unit": metric.get("unit"),
             "d3format": metric.get("d3format"),
             "glossary_term_ids": [term["term_id"] for term in metric.get("glossary_terms") or []],
+            "query_defaults": query_defaults_entry(metric.get("query_defaults")),
         }
         for dataset in catalog.get("datasets", [])
         for metric in dataset.get("metrics", [])

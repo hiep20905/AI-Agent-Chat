@@ -15,6 +15,7 @@ def catalog_metric(metric: dict[str, Any], dataset_name: str | None, provisional
         "unit": metric.get("unit"),
         "d3format": metric.get("d3format"),
         "glossary_term_ids": [],
+        "query_defaults": None,
         "provisional": provisional,
     }
 

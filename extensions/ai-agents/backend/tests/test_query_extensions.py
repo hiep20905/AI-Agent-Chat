@@ -157,3 +157,46 @@ def test_only_qualitative_concepts_are_structured_and_the_catalog_is_read_only_f
     assert structure_definitions([glossary], unread_catalog, model) == [None]
     conditions = structure_definitions([glossary, WIND_DEFINITION], lambda: CATALOG, model)
     assert conditions[0] is None and conditions[1]["dataset_id"] == 12 and model.calls == 1
+
+
+HOURLY_TEMPERATURE = {
+    "dataset_id": 12, "metric_id": 21, "name": "Nhiệt độ", "metric_name": "nhiet_do", "unit": "°C",
+    "query_defaults": {"grain": "day", "time_column": "ngay", "native_grain": "hour"},
+}
+DAILY_RAIN = {**METRICS[0], "query_defaults": {"grain": "day", "time_column": "ngay", "native_grain": "day"}}
+
+
+def test_a_time_grain_is_sent_only_when_every_metric_is_split_by_its_time_column():
+    plan = _plan(metric_ids=[21], dimensions=["ngay"], time_grain="hour")
+    by_hour = plan_query(plan, [DATASET], [HOURLY_TEMPERATURE], [])
+    assert by_hour.time_grain == "hour" and by_hour.request_body()["time_grain"] == "hour"
+
+    no_time_dimension = plan_query(_plan(metric_ids=[21], time_grain="hour"), [DATASET], [HOURLY_TEMPERATURE], [])
+    assert no_time_dimension.time_grain is None and "time_grain" not in no_time_dimension.request_body()
+
+    without_defaults = plan_query(_plan(dimensions=["ngay"], time_grain="month"), [DATASET], METRICS, [])
+    assert without_defaults.time_grain is None
+
+
+def test_a_grain_finer_than_the_data_is_answered_at_the_data_grain_and_said():
+    planned = plan_query(_plan(metric_ids=[20], dimensions=["ngay"], time_grain="hour"), [DATASET], [DAILY_RAIN], [])
+    assert planned.time_grain == "day"
+    assert any("chỉ có số liệu theo ngày" in note for note in planned.notes)
+
+
+def test_the_defaults_a_metric_applied_are_reported_with_the_default_period():
+    planned = plan_query(_plan(filters=[]), [DATASET], METRICS, [])
+    applied = {
+        "filters": [
+            {"column": "loai_quan_sat", "operator": "==", "value": "DU_BAO_NGAY", "source": "row_kind"},
+            {"column": "ngay", "operator": ">=", "value": "2026-10-20", "source": "time_window"},
+            {"column": "ngay", "operator": "<", "value": "2026-10-27", "source": "time_window"},
+        ],
+        "time_window": {"window": "last_7_day", "start": "2026-10-20", "end": "2026-10-27", "end_included": False},
+        "time_grain": None,
+    }
+
+    result = combined_result(planned, [{"rows": [{"tong_luong_mua": 12}], "applied_defaults": applied}])
+
+    assert result["defaults"][0]["filters"] == [applied["filters"][0]]
+    assert "từ 20/10/2026 đến 26/10/2026" in result["notes"][-1]
