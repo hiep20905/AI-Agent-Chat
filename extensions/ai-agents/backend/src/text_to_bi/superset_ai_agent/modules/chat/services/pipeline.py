@@ -19,6 +19,14 @@ from ..exceptions import QueryPlanError
 from . import prompts
 from .formula import answers_anything, doubtful_result, told_formula
 from .query import combined_result, plan_query, result_for_answer
+from .repair import (
+    MAX_QUERY_ATTEMPTS,
+    REPAIRABLE_KINDS,
+    empty_result_kind,
+    refusal_kind,
+    respelled_plan,
+    text_filters,
+)
 from .triage import TRIAGE_STATUSES, QuestionTriage, SubQuestion, blocked_reply, checked_triage
 
 MAX_HISTORY_TURNS = 3
@@ -29,6 +37,9 @@ WEEKDAYS = ("thứ Hai", "thứ Ba", "thứ Tư", "thứ Năm", "thứ Sáu", "t
 PLACEHOLDER = re.compile(r"\{\{\s*q(\d+)\s*\}\}")
 PART_FAILED_MESSAGE = "Không trả lời được phần này do lỗi khi xử lý."
 PART_SKIPPED_MESSAGE = "Phần trước không có kết quả để dùng tiếp, nên phần này chưa trả lời được."
+EMPTY_RESULT_DETAIL = "Không có dòng nào khớp các bộ lọc."
+# How many of a column's stored values a look-up shows the model and the page.
+MAX_VALUES_SHOWN = 50
 
 Event = tuple[str, dict[str, Any]]
 # Runs one approved metric: (dataset_id, metric_id, {dimensions, filters}) -> the Semantic Layer's answer.
@@ -83,6 +94,13 @@ class Understanding(BaseModel):
     user_rule_ids: list[int] = Field(default_factory=list)
     query: QueryPlan | None = None
     reason: str = ""
+
+
+class QueryRepair(BaseModel):
+    """A plan mended after a failed attempt, or None when no plan on this data answers the question."""
+
+    query: QueryPlan | None = None
+    reason: str = Field(default="", description="Một câu nói đã sửa gì, hoặc vì sao không sửa được.")
 
 
 class DefinitionOption(BaseModel):
@@ -166,6 +184,8 @@ class AgentOutcome:
     # The table the metric query answered with, or why it could not run.
     result: dict[str, Any] | None = None
     query_error: str | None = None
+    # Each metric query that failed or found nothing, why (`kind`, `detail`) and what was done about it (`fix`).
+    attempts: list[dict[str, Any]] = field(default_factory=list)
     answer: str = ""
     # A question split into sub-questions: each one answered (`parts`), and what each showed, in order, including the
     # ones that failed or were skipped (`part_results`). The fields above then gather what the parts found.
@@ -682,16 +702,9 @@ def _answer_question(
         outcome.suggestions = _suggestions(proposals, missing)
     elif not missing and run_metric is not None:
         plan = understanding.query.model_dump() if understanding.query else None
-        try:
-            planned = plan_query(plan, catalog.datasets, catalog.metrics, rules)
-            outcome.result = yield from _tool_call(
-                step, "query_metrics", {"plan": plan, "expert_rule_ids": [rule["id"] for rule in chosen_rules]},
-                lambda: _run_metrics(planned, run_metric),
-                _query_shown,
-            )
-            yield "result", outcome.result
-        except (QueryPlanError, SemanticLayerRefusedError) as error:
-            outcome.query_error = str(error)
+        step = yield from _query_with_repair(
+            step, plan, asked, catalog, rules, [rule["id"] for rule in chosen_rules], today, model, run_metric, outcome,
+        )
 
     answered_metrics = chosen_metrics or ([built_metric] if built_metric else [])
     context = {
@@ -709,7 +722,152 @@ def _answer_question(
         context["result"] = result_for_answer(outcome.result)
     if outcome.query_error:
         context["query_error"] = outcome.query_error
+    if outcome.attempts:
+        context["attempts"] = outcome.attempts
     return context
+
+
+def _dataset_columns(catalog: SemanticCatalog, dataset_id: int | None) -> dict[str, dict[str, Any]]:
+    dataset = next((item for item in catalog.datasets if item["id"] == dataset_id), None)
+    return {column["name"]: column for column in (dataset or {}).get("columns", [])}
+
+
+def _stored_values(planned: Any, columns: dict[str, dict[str, Any]], run_metric: MetricRunner) -> dict[str, list]:
+    """The values each text column the query filtered on holds, read by grouping its first metric by that column.
+
+    The metric runs as the asker with no filter of ours, so only data they may see is listed. A column that cannot be
+    grouped by is left out.
+    """
+    metric = planned.metrics[0]
+    stored: dict[str, list] = {}
+    for item in text_filters(planned.filters, columns):
+        name = item["column"]
+        if name in stored or not columns.get(name, {}).get("groupby"):
+            continue
+        answer = run_metric(planned.dataset_id, metric["metric_id"], {"dimensions": [name], "filters": []})
+        stored[name] = sorted({row[name] for row in answer.get("rows", []) if row.get(name) not in (None, "")}, key=str)
+    return stored
+
+
+def _values_shown(stored: dict[str, list]) -> dict[str, Any]:
+    return {name: {"count": len(values), "values": values[:MAX_VALUES_SHOWN]} for name, values in stored.items()}
+
+
+def _repair_input(
+    asked: str, plan: dict[str, Any] | None, problem: dict[str, Any], stored: dict[str, list],
+    catalog: SemanticCatalog, today: date,
+) -> str:
+    dataset_id = (plan or {}).get("dataset_id")
+    datasets = [item for item in catalog.datasets if item["id"] == dataset_id] or catalog.datasets
+    metrics = [item for item in catalog.metrics if item["dataset_id"] == dataset_id] or catalog.metrics
+    blocks = [
+        _today_block(today),
+        f"Câu hỏi: {asked}",
+        _data_block("Truy vấn vừa chạy", plan),
+        _data_block("Vấn đề", {key: problem[key] for key in ("kind", "detail")}),
+    ]
+    if stored:
+        blocks.append(_data_block("Giá trị thật trong dữ liệu", stored))
+    blocks += [
+        _data_block("Dataset: cột và giá trị có nhãn", datasets),
+        _data_block("Metric đã duyệt", _described(metrics, METRIC_FIELDS)),
+    ]
+    return "\n\n".join(blocks)
+
+
+def _query_with_repair(
+    step: int,
+    plan: dict[str, Any] | None,
+    asked: str,
+    catalog: SemanticCatalog,
+    rules: list[dict[str, Any]],
+    rule_ids: list[int],
+    today: date,
+    model: Any,
+    run_metric: MetricRunner,
+    outcome: AgentOutcome,
+):
+    """Run the plan; when it fails or finds nothing, find out why and mend it, for at most `MAX_QUERY_ATTEMPTS` runs.
+
+    The kinds of failure are those of docs/specs/xu-ly-loi-truy-van.md. A text filter the data does not spell that way
+    is respelled from the values the column holds ("Huế" is "Hue"), without the model; a plan the checks or Superset
+    reject goes back to the model with the reason; a Semantic Layer that did not answer is asked again. What trying
+    again cannot mend (no access, a period outside the data, no matching row) is left for the answer to explain. Every
+    run, look-up and repair is its own tool call, so the trajectory shows each. Returns the next step number.
+    """
+    last_result = None
+    respelled: list[str] = []
+    for attempt in range(1, MAX_QUERY_ATTEMPTS + 1):
+        planned = None
+        try:
+            planned = plan_query(plan, catalog.datasets, catalog.metrics, rules)
+            result = yield from _tool_call(
+                step, "query_metrics", {"plan": plan, "expert_rule_ids": rule_ids, "attempt": attempt},
+                lambda planned=planned: _run_metrics(planned, run_metric), _query_shown,
+            )
+            step += 1
+        except QueryPlanError as error:
+            problem = {"attempt": attempt, "kind": "invalid_plan", "detail": str(error)}
+        except SemanticLayerRefusedError as error:
+            step += 1
+            problem = {"attempt": attempt, "kind": refusal_kind(error), "detail": str(error)}
+        else:
+            last_result = result
+            kind = empty_result_kind(result, _dataset_columns(catalog, planned.dataset_id))
+            if kind not in REPAIRABLE_KINDS:
+                break
+            problem = {"attempt": attempt, "kind": kind, "detail": EMPTY_RESULT_DETAIL}
+        outcome.attempts.append(problem)
+        if problem["kind"] not in REPAIRABLE_KINDS or attempt == MAX_QUERY_ATTEMPTS:
+            break
+        if problem["kind"] == "transient":
+            continue
+        stored: dict[str, list] = {}
+        if problem["kind"] == "value_mismatch":
+            columns = _dataset_columns(catalog, planned.dataset_id)
+            explored = [item["column"] for item in text_filters(planned.filters, columns)]
+            try:
+                stored = yield from _tool_call(
+                    step, "explore_values", {"columns": explored},
+                    lambda planned=planned, columns=columns: _stored_values(planned, columns, run_metric),
+                    _values_shown,
+                )
+            except SemanticLayerRefusedError:
+                # The look-up failed and says so; the model still gets the problem without the values.
+                stored = {}
+            step += 1
+            fixed, changes = respelled_plan(plan, stored)
+            if fixed is not None:
+                plan, problem["fix"] = fixed, "; ".join(changes)
+                respelled += changes
+                continue
+        repair_input = _repair_input(asked, plan, problem, _values_shown(stored), catalog, today)
+        try:
+            repair = yield from _tool_call(
+                step, "repair_query", {"kind": problem["kind"], "detail": problem["detail"]},
+                lambda repair_input=repair_input: _ask(model, QueryRepair, prompts.REPAIR_QUERY, repair_input),
+                lambda value: value.model_dump(),
+            )
+        except Exception:  # noqa: BLE001
+            # The failure is reported as a tool call; the answer explains the problem that is left.
+            break
+        finally:
+            step += 1
+        if repair.query is None:
+            # Why no plan on this data answers ("no stored city is Đà Lạt"), for the answer to say.
+            problem["unfixable"] = repair.reason.strip() or None
+            break
+        plan, problem["fix"] = repair.query.model_dump(), repair.reason.strip() or None
+    if last_result is not None:
+        if respelled:
+            last_result["notes"] = [
+                *last_result["notes"], f"Đã đổi giá trị lọc theo cách viết trong dữ liệu: {'; '.join(respelled)}.",
+            ]
+        outcome.result = last_result
+        yield "result", outcome.result
+    elif outcome.attempts:
+        outcome.query_error = outcome.attempts[-1]["detail"]
+    return step
 
 
 def _lead_value(result: dict[str, Any] | None) -> str | None:

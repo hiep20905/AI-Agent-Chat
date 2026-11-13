@@ -144,6 +144,22 @@ tính phải có rule hoặc cách hiểu của người dùng); ngược lại 
 `reason`: một hai câu tiếng Việt giải thích lựa chọn.
 {DATA_NOTICE}"""
 
+REPAIR_QUERY = f"""Truy vấn số liệu vừa chạy để trả lời câu hỏi không thành công. Bạn sửa nó thành `query` mới dựa
+vào `Vấn đề`:
+- `invalid_plan`: truy vấn không qua kiểm tra (cột không lọc hay nhóm được, phép so sánh, kiểu giá trị…). Sửa đúng
+  chỗ được nêu. Cột khoá chỉ nhận khoá trong `labelled_values`; cột khoá không có `labelled_values` thì lọc trên cột
+  tên tương ứng có `filterable`.
+- `rejected_query`: Superset không nhận hoặc chạy lỗi truy vấn; lọc hay nhóm bằng cột khác phù hợp hơn.
+- `value_mismatch`: không dòng nào khớp vì giá trị lọc có thể không đúng cách viết trong dữ liệu. Chỉ dùng giá trị có
+  trong `Giá trị thật trong dữ liệu`, chọn giá trị cùng nghĩa (viết tắt, tên cũ, cách gọi khác). Không giá trị nào
+  cùng nghĩa thì để `query` null.
+Giữ nguyên ý câu hỏi: cùng metric, khoảng thời gian, chiều phân tích và ý lọc; không bỏ bộ lọc chỉ để có kết quả.
+Không sửa được thì để `query` null.
+{QUERY_RULES}
+
+`reason`: một câu tiếng Việt nói đã sửa gì, hoặc vì sao không sửa được.
+{DATA_NOTICE}"""
+
 PROPOSE_MISSING_ITEMS = f"""Semantic layer chưa có đủ nội dung để trả lời câu hỏi. Bạn soạn phần còn thiếu theo
 `missing`.
 
@@ -250,6 +266,12 @@ Khi có `result`:
   lọc sai giá trị nên chưa phản ánh đúng dữ liệu. Không khẳng định "không có" hay "bằng 0"; nói kết quả tạm tính chưa
   đáng tin, mời người dùng xem cách tính bên dưới và cho biết đã chuyển quản trị viên kiểm tra.
 Khi có `query_error`: nói ngắn rằng chưa lấy được số liệu và lý do, rồi nêu cách hiểu câu hỏi.
+Khi có `attempts`: hệ thống đã tự thử lại truy vấn. Có số liệu trong `result` thì không kể các lần thử; một giá trị lọc
+đã được đổi theo cách viết trong dữ liệu (có trong `result.notes`) thì nhắc ngắn. Không có số liệu thì giải thích
+nguyên nhân bằng lời thường theo `kind` của lần thử cuối (dựa vào `unfixable` nếu có), rồi gợi ý cách hỏi lại:
+`value_mismatch` là dữ liệu không có giá trị được hỏi (nêu giá trị đó, ví dụ "dữ liệu không có thành phố Đà Lạt");
+`invalid_plan` hay `rejected_query` là chưa lập được truy vấn hợp lệ cho câu hỏi; `transient` là hệ thống dữ liệu tạm
+thời không phản hồi, mời thử lại sau; `not_allowed` là chỉ số chưa được duyệt hoặc bạn chưa có quyền xem dữ liệu đó.
 Khi có `parts` (câu hỏi gồm nhiều ý): mỗi phần là một câu hỏi con với `question` và bối cảnh riêng có các trường như
 trên (`result`, `query_error`, `missing`, `clarifications`, `suggestions`…). Trả lời lần lượt từng phần theo thứ tự,
 mỗi phần một đoạn ngắn theo đúng các quy tắc trên cho bối cảnh của chính phần đó; không gộp số liệu của các phần với

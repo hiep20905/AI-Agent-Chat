@@ -166,8 +166,20 @@ numbers, and logs the question so administrators can fill the gaps:
    CSRF token forwarded), in parallel, and the answers merge into one table: a
    row per dimension value, a column per metric, key values shown by their
    labels. A `result` event carries it to the browser before the answer
-   streams. A plan the catalog does not allow, or a query the Semantic Layer
-   refuses, becomes `query_error` for the answer instead.
+   streams. A plan that fails or finds nothing is mended and run again, at
+   most three runs in all (`modules/chat/services/repair.py`,
+   `docs/specs/xu-ly-loi-truy-van.md`). No row with a text filter
+   (`value_mismatch`): `explore_values` groups the same metric by that column,
+   as the user and with no filter, to read the values the data holds, and a
+   value matching exactly one of them without accents or case ("Huế" is
+   "Hue") replaces the asked one with no model call, noted in the result's
+   `notes`. A plan the checks reject (`invalid_plan`), a query Superset
+   refuses or fails (`rejected_query`, 400 or 500), or a spelling no stored
+   value matches goes to `repair_query`, a model call given the reason and the
+   stored values; a Semantic Layer that did not answer (`transient`) is asked
+   the same again. No access (`not_allowed`), a period outside the data and no
+   matching row are not tried again. What is left after the last run becomes
+   `query_error`, and `attempts` lets the answer say why.
    Each catalog metric carries its approved `query_defaults` (grain, row
    kind, time column, default time window and default filters), which the
    Semantic Layer applies itself unless a filter names the same column. The

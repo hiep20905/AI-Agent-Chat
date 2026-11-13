@@ -13,6 +13,8 @@ const TOOL_LABELS: Record<string, string> = {
   load_semantic_catalog: 'Tải dữ liệu quản trị nghiệp vụ',
   understand_question: 'Hiểu câu hỏi, chọn thuật ngữ, metric, rule và lập truy vấn',
   query_metrics: 'Truy vấn số liệu',
+  explore_values: 'Không có dòng khớp: tra giá trị thật trong dữ liệu',
+  repair_query: 'Sửa truy vấn sau lỗi',
   propose_missing_items: 'Đề xuất phần còn thiếu',
   load_data_model: 'Chưa có metric đã duyệt: đọc mô hình dữ liệu',
   draft_metric: 'Tìm bảng tổng hợp và dựng metric',

@@ -13,6 +13,8 @@ EXPERT_RULES_API = "/extensions/text-to-bi/superset-semantic-layer/expert-rules/
 REQUEST_TIMEOUT_SECONDS = 20
 # Approved content changes rarely; a user's follow-up questions reuse what was read a moment ago.
 CACHE_SECONDS = 60
+# Answers that say "busy" or "not now" rather than "no": the same request may pass if sent again.
+TRANSIENT_STATUSES = (429, 502, 503, 504)
 
 _cache_lock = threading.Lock()
 
@@ -49,11 +51,16 @@ def post_json(path: str, body: dict[str, Any], cookie_header: str, csrf_token: s
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
     except requests.RequestException as error:
-        raise SemanticLayerRefusedError(f"Không kết nối được tới Semantic Layer để {action}.") from error
+        raise SemanticLayerRefusedError(
+            f"Không kết nối được tới Semantic Layer để {action}.", transient=True,
+        ) from error
     answer = response.json() if response.headers.get("Content-Type", "").startswith("application/json") else {}
     if response.status_code not in (200, 201):
         message = answer.get("message") if isinstance(answer.get("message"), str) else None
-        raise SemanticLayerRefusedError(message or f"Semantic Layer trả về lỗi {response.status_code} khi {action}.")
+        raise SemanticLayerRefusedError(
+            message or f"Semantic Layer trả về lỗi {response.status_code} khi {action}.",
+            status_code=response.status_code, transient=response.status_code in TRANSIENT_STATUSES,
+        )
     return answer
 
 
