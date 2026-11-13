@@ -9,6 +9,7 @@ from text_to_bi.superset_ai_agent.modules.chat.services.repair import (
     closest_value,
     empty_result_kind,
     normalized_text,
+    ranked_values,
     refusal_kind,
     respelled_plan,
 )
@@ -95,12 +96,32 @@ def test_text_is_compared_without_accents_case_or_punctuation():
     ("Huế", ["Ha Noi", "Hue"], "Hue"),
     ("TP Hồ Chí Minh", ["Ho Chi Minh", "Ha Noi"], "Ho Chi Minh"),
     ("Ha Nôi", ["Ha Noi", "Hai Phong"], "Ha Noi"),
-    ("Hà Nọi", ["Ha Noi", "Hai Phong"], "Ha Noi"),
+    ("Buôn Ma Thuật", ["Buon Ma Thuot", "Ha Noi"], "Buon Ma Thuot"),
     ("Ha", ["Ha Noi", "Ha Long"], None),
     ("Paris", ["Ha Noi", "Hue"], None),
+    # A code one digit away is another record, however alike it reads.
+    ("DH000123", ["DH000124", "DH000999"], None),
+    ("dh-000123", ["DH000123", "DH000124"], "DH000123"),
+    # A short name inside a longer one is too little to stand for it.
+    ("Phú", ["Phu Quoc", "Ha Noi"], None),
+    ("Nam", ["Mien Nam", "Mien Bac"], None),
+    ("Nguyễn Văn An", ["Nguyen Van Anh", "Tran Thi Binh"], "Nguyen Van Anh"),
 ])
 def test_the_closest_stored_value_is_the_only_one_the_asked_value_can_stand_for(asked, stored, found):
     assert closest_value(asked, stored) == found
+
+
+def test_a_list_cut_short_takes_only_the_same_text_since_the_asked_value_may_be_left_out():
+    assert closest_value("Nguyễn Văn An", ["Nguyen Van Anh"], exact_only=True) is None
+    assert closest_value("Huế", ["Ha Noi", "Hue"], exact_only=True) == "Hue"
+
+
+def test_the_values_shown_are_those_most_like_the_asked_ones():
+    stored = [f"Khach hang {index:03d}" for index in range(500)] + ["Cong ty Hoa Binh", "Cong ty Hoa Phat"]
+
+    shown = ranked_values(["Công ty Hòa Phát"], stored, 3)
+
+    assert shown[0] == "Cong ty Hoa Phat" and shown[1] == "Cong ty Hoa Binh" and len(shown) == 3
 
 
 @pytest.mark.parametrize(("error", "kind"), [
@@ -126,6 +147,9 @@ def test_a_respelled_plan_changes_only_values_the_data_spells_otherwise():
     assert changes == ["“Huế” → “Hue”"]
     assert respelled_plan(plan, {"ten_thanh_pho": ["Ha Noi", "Hue", "Huế"]}) == (None, [])
     assert respelled_plan(plan, {"ten_thanh_pho": ["Da Nang"]}) == (None, [])
+    near = {"dataset_id": 12, "filters": [{"column": "ten_thanh_pho", "operator": "==", "value": "Huee"}]}
+    assert respelled_plan(near, {"ten_thanh_pho": ["Hue"]})[1] == ["“Huee” → “Hue”"]
+    assert respelled_plan(near, {"ten_thanh_pho": ["Hue"]}, frozenset({"ten_thanh_pho"})) == (None, [])
 
 
 @pytest.mark.parametrize(("result", "kind"), [
@@ -151,7 +175,7 @@ def test_a_name_the_data_spells_without_accents_is_respelled_from_the_stored_val
     assert "QueryRepair" not in [schema for schema, _ in model.prompts]
     assert semantic_layer.calls[1] == {"dimensions": ["ten_thanh_pho"], "filters": []}
     explored = next(data for name, data in events if name == "tool_end" and data["name"] == "explore_values")
-    assert explored["result"] == {"ten_thanh_pho": {"count": 2, "values": ["Ha Noi", "Hue"]}}
+    assert explored["result"] == {"ten_thanh_pho": {"count": 2, "truncated": False, "closest": ["Hue", "Ha Noi"]}}
     assert outcome.result["rows"] == [{"nhiet_do_cao_nhat": 23.1}]
     assert outcome.result["notes"][-1] == "Đã đổi giá trị lọc theo cách viết trong dữ liệu: “Huế” → “Hue”."
     assert outcome.attempts == [
@@ -235,4 +259,19 @@ def test_a_failing_look_up_still_lets_the_model_try():
     outcome, events, _, _ = _run(_in_city("Huế"), repair=mended, semantic_layer=run_metric)
 
     assert _steps(events)[3:] == ["query_metrics", "explore_values", "repair_query", "query_metrics"]
+    assert outcome.result["rows"] == [{"nhiet_do_cao_nhat": 23.1}]
+
+
+def test_a_near_spelling_in_a_list_cut_short_goes_to_the_model_rather_than_being_taken():
+    mended = pipeline.QueryRepair(query=_plan(_in_city("Hue")), reason="Chọn Hue trong danh sách.")
+    layer = CitiesSemanticLayer()
+
+    def run_metric(dataset_id, metric_id, query):
+        answer = layer(dataset_id, metric_id, query)
+        return {**answer, "truncated": query["dimensions"] == ["ten_thanh_pho"]}
+
+    outcome, events, model, _ = _run(_in_city("Huee"), repair=mended, semantic_layer=run_metric)
+
+    assert _steps(events)[3:] == ["query_metrics", "explore_values", "repair_query", "query_metrics"]
+    assert '"truncated": true' in model.prompt("QueryRepair")
     assert outcome.result["rows"] == [{"nhiet_do_cao_nhat": 23.1}]

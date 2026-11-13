@@ -150,9 +150,11 @@ vào `Vấn đề`:
   chỗ được nêu. Cột khoá chỉ nhận khoá trong `labelled_values`; cột khoá không có `labelled_values` thì lọc trên cột
   tên tương ứng có `filterable`.
 - `rejected_query`: Superset không nhận hoặc chạy lỗi truy vấn; lọc hay nhóm bằng cột khác phù hợp hơn.
-- `value_mismatch`: không dòng nào khớp vì giá trị lọc có thể không đúng cách viết trong dữ liệu. Chỉ dùng giá trị có
-  trong `Giá trị thật trong dữ liệu`, chọn giá trị cùng nghĩa (viết tắt, tên cũ, cách gọi khác). Không giá trị nào
-  cùng nghĩa thì để `query` null.
+- `value_mismatch`: không dòng nào khớp vì giá trị lọc có thể không đúng cách viết trong dữ liệu. `Giá trị thật trong
+  dữ liệu` cho mỗi cột: `count` giá trị, `closest` là các giá trị giống giá trị được hỏi nhất. Chỉ dùng giá trị có
+  trong `closest`, chọn giá trị cùng nghĩa (viết tắt, tên cũ, cách gọi khác); mã, số hiệu khác nhau dù một chữ số là
+  hai bản ghi khác nhau. Không giá trị nào cùng nghĩa thì để `query` null; khi `truncated` là true, danh sách chỉ là
+  một phần nên nói là không tìm thấy trong phần đã tra, không nói dữ liệu không có.
 Giữ nguyên ý câu hỏi: cùng metric, khoảng thời gian, chiều phân tích và ý lọc; không bỏ bộ lọc chỉ để có kết quả.
 Không sửa được thì để `query` null.
 {QUERY_RULES}

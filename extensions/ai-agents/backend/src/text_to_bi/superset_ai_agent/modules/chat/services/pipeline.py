@@ -23,6 +23,7 @@ from .repair import (
     MAX_QUERY_ATTEMPTS,
     REPAIRABLE_KINDS,
     empty_result_kind,
+    ranked_values,
     refusal_kind,
     respelled_plan,
     text_filters,
@@ -732,29 +733,45 @@ def _dataset_columns(catalog: SemanticCatalog, dataset_id: int | None) -> dict[s
     return {column["name"]: column for column in (dataset or {}).get("columns", [])}
 
 
-def _stored_values(planned: Any, columns: dict[str, dict[str, Any]], run_metric: MetricRunner) -> dict[str, list]:
-    """The values each text column the query filtered on holds, read by grouping its first metric by that column.
+def _stored_values(
+    planned: Any, columns: dict[str, dict[str, Any]], run_metric: MetricRunner,
+) -> dict[str, dict[str, Any]]:
+    """For each text column the query filtered on: the values asked, the values the data holds, and whether the
+    Semantic Layer cut that list at its row cap (a long column, such as customers, may hold more).
 
-    The metric runs as the asker with no filter of ours, so only data they may see is listed. A column that cannot be
-    grouped by is left out.
+    The values are read by grouping the query's first metric by the column, as the asker and with no filter of ours, so
+    only data they may see is listed. A column that cannot be grouped by is left out.
     """
     metric = planned.metrics[0]
-    stored: dict[str, list] = {}
+    stored: dict[str, dict[str, Any]] = {}
     for item in text_filters(planned.filters, columns):
         name = item["column"]
-        if name in stored or not columns.get(name, {}).get("groupby"):
+        asked = item["value"] if isinstance(item["value"], list) else [item["value"]]
+        if name in stored:
+            stored[name]["asked"] += asked
+            continue
+        if not columns.get(name, {}).get("groupby"):
             continue
         answer = run_metric(planned.dataset_id, metric["metric_id"], {"dimensions": [name], "filters": []})
-        stored[name] = sorted({row[name] for row in answer.get("rows", []) if row.get(name) not in (None, "")}, key=str)
+        values = sorted({row[name] for row in answer.get("rows", []) if row.get(name) not in (None, "")}, key=str)
+        stored[name] = {"asked": asked, "values": values, "truncated": bool(answer.get("truncated"))}
     return stored
 
 
-def _values_shown(stored: dict[str, list]) -> dict[str, Any]:
-    return {name: {"count": len(values), "values": values[:MAX_VALUES_SHOWN]} for name, values in stored.items()}
+def _values_shown(stored: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """What the model and the page see of each column: how many values, whether the list was cut, and the values most
+    like the asked ones, so the right one is among them even in a long column."""
+    return {
+        name: {
+            "count": len(column["values"]), "truncated": column["truncated"],
+            "closest": ranked_values(column["asked"], column["values"], MAX_VALUES_SHOWN),
+        }
+        for name, column in stored.items()
+    }
 
 
 def _repair_input(
-    asked: str, plan: dict[str, Any] | None, problem: dict[str, Any], stored: dict[str, list],
+    asked: str, plan: dict[str, Any] | None, problem: dict[str, Any], stored: dict[str, Any],
     catalog: SemanticCatalog, today: date,
 ) -> str:
     dataset_id = (plan or {}).get("dataset_id")
@@ -822,7 +839,7 @@ def _query_with_repair(
             break
         if problem["kind"] == "transient":
             continue
-        stored: dict[str, list] = {}
+        stored: dict[str, dict[str, Any]] = {}
         if problem["kind"] == "value_mismatch":
             columns = _dataset_columns(catalog, planned.dataset_id)
             explored = [item["column"] for item in text_filters(planned.filters, columns)]
@@ -836,7 +853,10 @@ def _query_with_repair(
                 # The look-up failed and says so; the model still gets the problem without the values.
                 stored = {}
             step += 1
-            fixed, changes = respelled_plan(plan, stored)
+            fixed, changes = respelled_plan(
+                plan, {name: column["values"] for name, column in stored.items()},
+                frozenset(name for name, column in stored.items() if column["truncated"]),
+            )
             if fixed is not None:
                 plan, problem["fix"] = fixed, "; ".join(changes)
                 respelled += changes

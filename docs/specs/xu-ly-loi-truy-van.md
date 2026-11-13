@@ -49,12 +49,20 @@ model vẫn được nhờ sửa, chỉ là không có danh sách giá trị.
 `closest_value` nhận một giá trị khi và chỉ khi nó đứng cho đúng một giá trị trong dữ liệu, xét lần lượt:
 
 1. Giống hệt sau khi bỏ dấu ("Huế" là "Hue").
-2. Tên này nằm trong tên kia ("TP Hồ Chí Minh" là "Ho Chi Minh").
-3. Gần giống, độ giống từ 0,85 trở lên (`difflib`): "Hà Nọi" là "Ha Noi".
+2. Tên này nằm trọn từ trong tên kia và dài ít nhất 60% tên kia ("TP Hồ Chí Minh" là "Ho Chi Minh"; "Phú" không là
+   "Phu Quoc", "Nam" không là "Mien Nam").
+3. Gần giống, độ giống từ 0,85 trở lên (`difflib`): "Buôn Ma Thuật" là "Buon Ma Thuot".
 
-Bước nào ra từ hai giá trị trở lên thì không chọn ("Ha" có thể là "Ha Noi" hay "Ha Long"); việc chọn chuyển cho model
-cùng danh sách giá trị. Giá trị nào đổi thì ghi vào `result.notes`: "Đã đổi giá trị lọc theo cách viết trong dữ liệu:
-“Huế” → “Hue”."
+Bước 2 và 3 chỉ xét giá trị có **cùng các con số**: mã lệch một chữ số là bản ghi khác ("DH000123" không bao giờ là
+"DH000124"). Bước nào ra từ hai giá trị trở lên thì không chọn ("Ha" có thể là "Ha Noi" hay "Ha Long"); việc chọn
+chuyển cho model. Giá trị nào đổi thì ghi vào `result.notes`: "Đã đổi giá trị lọc theo cách viết trong dữ liệu: “Huế”
+→ “Hue”."
+
+Cột dài (khách hàng, sản phẩm): Semantic Layer cắt danh sách ở giới hạn dòng (`SEMANTIC_QUERY_MAX_ROWS`, mặc định
+1.000) và báo `truncated`. Khi đó giá trị được hỏi có thể nằm ngoài danh sách, nên chỉ nhận bước 1; giá trị gần giống
+chuyển cho model, và câu trả lời nói "không tìm thấy trong phần đã tra" thay vì "dữ liệu không có". Model và giao diện
+thấy `count`, `truncated` và 50 giá trị **giống giá trị được hỏi nhất** (`closest`), không phải 50 giá trị đầu theo
+thứ tự chữ cái.
 
 ## 5. Luồng
 
