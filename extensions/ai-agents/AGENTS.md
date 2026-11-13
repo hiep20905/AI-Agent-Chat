@@ -78,10 +78,20 @@ numbers, and logs the question so administrators can fill the gaps:
    cookie, so the agent only sees approved content on datasets that user may
    access. The catalog is cached per user for 60 seconds.
 4. `understand_question` is one model call that does what used to be four
-   steps. It reads the classifier's sub-question when there is exactly one, so
-   greetings and parts set aside are gone; a question split in several is read
-   as asked until sub-questions run one by one. The call rewrites a follow-up
-   into a standalone question; picks the glossary terms, metrics, expert rules and the user's own definitions the question is
+   steps. It reads the classifier's sub-question, so greetings and parts set
+   aside are gone. A question split into several (`parallel` or `sequential`)
+   runs steps 4 to 6 once per sub-question, each understood without the
+   conversation since it already stands alone: the independent ones in threads
+   of their own, side by side, and a sequential one once the sub-questions it
+   `depends_on` have answered, with `{{q<id>}}` replaced by the first row's
+   first dimension (or first figure) of that answer. Its tool calls carry
+   `part` and an ID of their own (`q<id>_call_<n>`), and it ends with one
+   `part_result` event (`id`, `question`, `result`, `query_error`, `skipped`).
+   A failing sub-question keeps its error and the others go on; one whose
+   source found nothing is `skipped`; only when every one fails does the
+   question fail. The call rewrites a follow-up into a standalone question;
+   picks the glossary terms, metrics, expert rules and the user's own
+   definitions the question is
    about (IDs it invents are dropped); lists `undefined_concepts` (business
    concepts nothing defines; time, place and aggregation words do not count);
    classifies the question as `qualitative` (worded by perception with a vague
@@ -175,17 +185,24 @@ numbers, and logs the question so administrators can fill the gaps:
 
 The stream opens with a `session` event naming the conversation (new or
 existing). Each step then reaches the browser as a tool call (`tool_start`,
-`tool_end`), then `result` when a query ran, `token` events, and a closing
+`tool_end`), then `result` (or `part_result` per sub-question) when a query ran,
+`token` events, and a closing
 `done` event. A question is `resolved` when it found at least one metric, has no
 `undefined_concepts`, and has an approved or user's expert rule if it is
 qualitative; otherwise it is `needs_review` with `missing` listing what was not
 found. A question answered without a query lacks nothing: `metadata` and
 `chitchat` are `resolved`, `out_of_domain`, `unsupported` and `unclear` are
-`declined`, and `blocked` is `blocked`. `done` also carries `clarifications`, the `user_definitions` used,
-`result` and `query_error`. The log stores `triage` (the classifier's labels, NULL on
-older questions), `requires_expert_rule` (NULL on older questions), `suggestions`, `clarifications` with `clarification_state`
-(`pending`, `confirmed`, `dismissed`), `retry_of` on the answer given again after
-a confirmation, and `query_result`. A metric proposal opens on the Metrics page,
+`declined`, and `blocked` is `blocked`. A question split into sub-questions
+lacks what any of them lacks, and its glossary terms, metrics, rules,
+clarifications and suggestions gather theirs. `done` also carries
+`clarifications`, the `user_definitions` used, `result`, `query_error` and, for
+a split question, `parts` in the classifier's order. The log stores `triage`
+(the classifier's labels, NULL on older questions), `requires_expert_rule`
+(NULL on older questions), `suggestions`, `clarifications` with
+`clarification_state` (`pending`, `confirmed`, `dismissed`), `retry_of` on the
+answer given again after a confirmation, `query_result`, and `part_results` for
+a split question. The page shows each sub-question's table or chart under its
+number and text, and tags each step with the sub-question it belongs to. A metric proposal opens on the Metrics page,
 because metrics are created in the Superset dataset editor.
 
 The page shows a result as one number per metric, a line or columns over time

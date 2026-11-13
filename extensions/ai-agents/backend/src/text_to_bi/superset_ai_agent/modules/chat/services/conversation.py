@@ -97,6 +97,7 @@ def log_question(
         expert_rules=outcome.expert_rules,
         missing=[] if error else outcome.missing,
         query_result=None if error else outcome.result,
+        part_results=None if error else outcome.part_results or None,
         requires_expert_rule=None if error else outcome.requires_expert_rule,
         suggestions=None if error else outcome.suggestions,
         tool_calls=tool_calls,

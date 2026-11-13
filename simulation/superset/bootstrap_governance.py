@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS public.text_to_bi_agent_question (
     clarification_state VARCHAR(20),
     retry_of INTEGER,
     query_result JSON,
+    part_results JSON,
     created_on TIMESTAMP WITH TIME ZONE NOT NULL
 );
 ALTER TABLE public.text_to_bi_agent_question ADD COLUMN IF NOT EXISTS requires_expert_rule BOOLEAN;
@@ -60,6 +61,7 @@ ALTER TABLE public.text_to_bi_agent_question ADD COLUMN IF NOT EXISTS clarificat
 ALTER TABLE public.text_to_bi_agent_question ADD COLUMN IF NOT EXISTS retry_of INTEGER;
 ALTER TABLE public.text_to_bi_agent_question ADD COLUMN IF NOT EXISTS query_result JSON;
 ALTER TABLE public.text_to_bi_agent_question ADD COLUMN IF NOT EXISTS triage JSON;
+ALTER TABLE public.text_to_bi_agent_question ADD COLUMN IF NOT EXISTS part_results JSON;
 CREATE INDEX IF NOT EXISTS ix_text_to_bi_agent_question_created_on ON public.text_to_bi_agent_question (created_on);
 CREATE INDEX IF NOT EXISTS ix_text_to_bi_agent_question_status ON public.text_to_bi_agent_question (status);
 CREATE INDEX IF NOT EXISTS ix_text_to_bi_agent_question_user_id ON public.text_to_bi_agent_question (user_id);

@@ -176,15 +176,3 @@ def test_a_single_sub_question_is_what_the_question_understanding_step_reads():
     assert '"set_aside"' in model.prompt("final") and "giá vàng hôm nay" in model.prompt("final")
     assert (outcome.status, outcome.triage["execution"]) == ("resolved", "single")
 
-
-def test_a_question_split_in_several_is_still_understood_as_asked():
-    triage = QuestionTriage(
-        triage="answerable",
-        sub_questions=[
-            _sub(1, "Thành phố nào mưa nhiều nhất?", "ranking"), _sub(2, "Độ ẩm ở {{q1}}?", depends_on=(1,)),
-        ],
-    )
-    _, events, _, _ = _run(triage, "Thành phố nào mưa nhiều nhất, độ ẩm ở đó bao nhiêu?", _answers())
-
-    understood = next(data for name, data in events if name == "tool_start" and data["name"] == "understand_question")
-    assert understood["arguments"]["question"] == "Thành phố nào mưa nhiều nhất, độ ẩm ở đó bao nhiêu?"

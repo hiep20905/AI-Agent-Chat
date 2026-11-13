@@ -132,6 +132,7 @@ class TextToBIAgentAPI(RestApi):
                 "clarifications": [] if error or question_id is None else outcome.clarifications,
                 "user_definitions": [] if error else outcome.user_definitions,
                 "result": None if error else outcome.result,
+                "parts": [] if error else outcome.part_results,
                 "query_error": None if error else outcome.query_error,
             })
 

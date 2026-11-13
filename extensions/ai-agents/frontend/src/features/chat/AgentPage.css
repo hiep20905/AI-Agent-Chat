@@ -222,6 +222,10 @@ header#main-menu.top > .ant-row > .ant-col-md-8 { flex: 0 0 auto; max-width: non
   color: var(--ai-muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ai-tool-call-duration { color: var(--ai-muted); font-variant-numeric: tabular-nums; margin-left: auto; }
+.ai-tool-call-part {
+  background: color-mix(in srgb, var(--ai-accent) 14%, transparent); border-radius: 4px; color: var(--ai-accent);
+  flex: 0 0 auto; font-size: 11px; font-weight: 600; padding: 1px 6px;
+}
 .ai-tool-call-body { background: var(--ai-surface-muted); border-top: 1px solid var(--ai-border); padding: 8px 10px; }
 .ai-tool-call-caption {
   color: var(--ai-muted); font-size: 11px; font-weight: 600; margin: 4px 0; text-transform: uppercase;
@@ -246,6 +250,17 @@ header#main-menu.top > .ant-row > .ant-col-md-8 { flex: 0 0 auto; max-width: non
 .ai-outcome.is-resolved { background: color-mix(in srgb, #2f9e6b 12%, transparent); color: #23855a; }
 .ai-outcome.is-review { background: color-mix(in srgb, #d99a1c 14%, transparent); color: #a8730c; }
 .ai-outcome.is-failed { background: color-mix(in srgb, #d64545 12%, transparent); color: #c03a3a; }
+
+/* A question split into sub-questions: one block per sub-question, headed by its number and text. */
+.ai-part-results { display: flex; flex-direction: column; gap: 12px; }
+.ai-part-result { display: flex; flex-direction: column; gap: 6px; }
+.ai-part-question {
+  align-items: baseline; color: var(--ai-text-secondary); display: flex; font-size: 13px; gap: 6px; margin: 0;
+}
+.ai-part-number {
+  background: var(--ai-accent); border-radius: 50%; color: #fff; display: inline-grid; flex: 0 0 18px; font-size: 11px;
+  font-weight: 600; height: 18px; place-items: center; width: 18px;
+}
 
 .ai-chat-composer-box {
   align-items: flex-end; background: var(--ai-surface-raised); border: 1px solid var(--ai-border); border-radius: 12px;

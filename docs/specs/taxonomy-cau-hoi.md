@@ -1,6 +1,6 @@
 # Đặc tả: Taxonomy câu hỏi của người dùng
 
-Trạng thái: **đang làm**, bước 2 và 3 ở mục 12 đã làm · Ngày: 13/11/2026 · Phạm vi: AI Agent (bước phân loại và
+Trạng thái: **đang làm**, bước 2 đến 4 ở mục 12 đã làm · Ngày: 13/11/2026 · Phạm vi: AI Agent (bước phân loại và
 guardrail đứng trước `understand_question`)
 
 ## 1. Vấn đề
@@ -229,6 +229,11 @@ quan AI Agent" và benchmark dùng. Câu trả lời không qua truy vấn khôn
 `metadata` và `chitchat` là `resolved`; `out_of_domain`, `unsupported`, `unclear` là `declined` ("Ngoài phạm vi");
 `blocked` là `blocked` ("Bị chặn").
 
+Câu tách thành nhiều câu con: mỗi câu con có các bước riêng (gắn `part`, ID dạng `q<id>_call_<n>`) và kết thúc bằng
+sự kiện `part_result`. Cột JSON `part_results` lưu từng câu con: câu hỏi, bảng kết quả, lỗi hoặc lý do bị bỏ qua.
+Câu hỏi thiếu những gì bất kỳ câu con nào thiếu. Câu con tuần tự mà câu trước không có dòng nào thì bị bỏ qua và câu
+trả lời nói lý do. Chỉ khi mọi câu con đều lỗi thì cả câu mới lỗi.
+
 ## 10. Bộ câu ví dụ gán nhãn
 
 `extensions/ai-agents/backend/tests/fixtures/question_taxonomy.jsonl` có các câu trên dữ liệu thời tiết, mỗi dòng
@@ -259,9 +264,9 @@ Mỗi dòng có các trường `id`, `question`, `history` (nếu có, danh sác
 1. Duyệt đặc tả này và bộ câu ví dụ.
 2. **Đã làm.** Thêm model `QuestionTriage`, prompt phân loại và phần kiểm tra đầu ra; test với model giả.
 3. **Đã làm.** Nối bước phân loại vào `run_agent`: các nhánh không phải `answerable` trả lời ngay. Câu có đúng một
-   câu con được hiểu theo câu con đó; câu tách thành nhiều câu con tạm vẫn được hiểu nguyên văn trong một kế hoạch
-   cho tới bước 4.
-4. Chạy câu con song song hoặc tuần tự, ghép kết quả trong `FINAL_ANSWER`; sự kiện SSE và giao diện cho câu con.
+   câu con được hiểu theo câu con đó.
+4. **Đã làm.** Chạy câu con song song (mỗi câu một thread) hoặc tuần tự theo `depends_on`, ghép kết quả trong
+   `FINAL_ANSWER`; sự kiện `part_result` và giao diện cho câu con.
 5. Kiểm tra PII lớp 2.
 6. Ghi log các nhãn; đo độ chính xác trên bộ câu ví dụ.
 

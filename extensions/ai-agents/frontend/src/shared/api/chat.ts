@@ -4,7 +4,8 @@ import { getJson, sendJson } from './http';
 export type QuestionStatus = 'resolved' | 'needs_review' | 'declined' | 'blocked' | 'failed';
 export type MissingKind = 'glossary' | 'metric' | 'expert_rule';
 
-export type ToolStartEvent = { id: string; name: string; arguments: Record<string, unknown> };
+/** `part` is the sub-question a step belongs to, when the question was split into several. */
+export type ToolStartEvent = { id: string; name: string; arguments: Record<string, unknown>; part?: number };
 export type ToolEndEvent = {
   id: string;
   name: string;
@@ -113,6 +114,16 @@ export type DoneEvent = {
   user_definitions: UsedDefinition[];
   result: QueryResult | null;
   query_error: string | null;
+  parts?: PartResult[];
+};
+
+/** One sub-question of a question split into several: its table, why it failed, or why it was skipped. */
+export type PartResult = {
+  id: number;
+  question: string;
+  result: QueryResult | null;
+  query_error: string | null;
+  skipped: string | null;
 };
 
 export type SessionEvent = { id: number; title: string; dashboard_id: number };
@@ -122,6 +133,7 @@ export type ChatStreamEvent =
   | { name: 'tool_start'; data: ToolStartEvent }
   | { name: 'tool_end'; data: ToolEndEvent }
   | { name: 'result'; data: QueryResult }
+  | { name: 'part_result'; data: PartResult }
   | { name: 'token'; data: { text: string } }
   | { name: 'error'; data: { message: string } }
   | { name: 'done'; data: DoneEvent };
@@ -151,6 +163,7 @@ export type StoredTurn = {
   clarification_state: ClarificationState | null;
   retry_of: number | null;
   result: QueryResult | null;
+  parts?: PartResult[];
   asked_on: string;
 };
 

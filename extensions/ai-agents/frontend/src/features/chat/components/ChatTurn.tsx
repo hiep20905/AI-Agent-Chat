@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
   ChatStreamEvent, ClarificationState, ConfirmedDefinition, DefinitionDraft, DefinitionKind, MissingKind,
-  QueryResult, QuestionStatus, StoredTurn, UsedDefinition,
+  PartResult, QueryResult, QuestionStatus, StoredTurn, UsedDefinition,
 } from '../../../shared/api/chat';
 import { QueryResultView } from './QueryResultView';
 
@@ -45,6 +45,8 @@ export type ToolCall = {
   result?: unknown;
   error?: string;
   durationMs?: number;
+  /** The sub-question the step belongs to, when the question was split into several. */
+  part?: number;
 };
 
 export type Turn = {
@@ -64,6 +66,8 @@ export type Turn = {
   usedDefinitions: UsedDefinition[];
   /** What the approved metrics answered, shown under the answer. */
   result: QueryResult | null;
+  /** A question split into sub-questions: what each answered, in order, instead of `result`. */
+  parts: PartResult[];
 };
 
 function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
@@ -79,6 +83,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
           {toolCall.status === 'ok' && <Check />}
           {toolCall.status === 'error' && <X />}
         </span>
+        {toolCall.part !== undefined && <span className="ai-tool-call-part">Ý {toolCall.part}</span>}
         <code className="ai-tool-call-name">{toolCall.name}</code>
         {label && <span className="ai-tool-call-label">{label}</span>}
         {toolCall.durationMs !== undefined && (
@@ -168,7 +173,7 @@ function OutcomeBadge({ turn, outcome }: { turn: Turn; outcome: NonNullable<Turn
   const unasked = outcome.missing.filter(kind => kind !== 'metric' && !askedKinds.has(kind));
   if (!metricMissing && unasked.length === 0) return null;
   // A metric the agent built on an aggregate table answered already; it only waits for an administrator's approval.
-  const metricText = turn.result?.provisional
+  const metricText = turn.result?.provisional || turn.parts.some(part => part.result?.provisional)
     ? 'Số liệu tạm tính bằng metric AI Agent vừa dựng từ bảng tổng hợp; metric đang chờ quản trị viên duyệt. '
     : 'Chưa có metric phù hợp; quản trị viên sẽ xem xét bổ sung. ';
   return (
@@ -382,6 +387,7 @@ export function TurnView(
         )}
         {turn.state === 'streaming' && turn.answer && <span className="ai-caret" aria-hidden="true" />}
         {turn.result && <QueryResultView result={turn.result} />}
+        {turn.parts.length > 0 && <PartResults parts={turn.parts} />}
         {turn.error && <p className="ai-outcome is-failed">{turn.error}</p>}
         {turn.state === 'stopped' && <p className="ai-outcome">Đã dừng.</p>}
         {turn.outcome && <OutcomeBadge turn={turn} outcome={turn.outcome} />}
@@ -393,6 +399,23 @@ export function TurnView(
           />
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/** Each sub-question of a question split into several, in order, with its own table or chart. */
+function PartResults({ parts }: { parts: PartResult[] }) {
+  return (
+    <div className="ai-part-results">
+      {parts.map(part => (
+        <section key={part.id} className="ai-part-result">
+          <p className="ai-part-question"><span className="ai-part-number">{part.id}</span> {part.question}</p>
+          {part.result && <QueryResultView result={part.result} />}
+          {!part.result && (part.skipped || part.query_error) && (
+            <p className="ai-outcome is-review">{part.skipped || part.query_error}</p>
+          )}
+        </section>
+      ))}
     </div>
   );
 }
@@ -413,6 +436,7 @@ export function turnFromStored(stored: StoredTurn): Turn {
     retryOf: stored.retry_of,
     usedDefinitions: [],
     result: stored.result ?? null,
+    parts: stored.parts ?? [],
   };
 }
 
@@ -420,7 +444,7 @@ export function turnFromStored(stored: StoredTurn): Turn {
 export function newTurn(question: string, retryOf: number | null = null): Turn {
   return {
     id: Date.now(), question, toolCalls: [], answer: '', state: 'streaming', clarifications: [],
-    clarificationState: null, retryOf, usedDefinitions: [], result: null,
+    clarificationState: null, retryOf, usedDefinitions: [], result: null, parts: [],
   };
 }
 
@@ -438,12 +462,17 @@ export function applyStreamEvent(turn: Turn, event: ChatStreamEvent): Turn {
     }
     case 'result':
       return { ...turn, result: event.data };
+    case 'part_result': {
+      const parts = [...turn.parts.filter(part => part.id !== event.data.id), event.data];
+      return { ...turn, parts: parts.sort((first, second) => first.id - second.id) };
+    }
     case 'token':
       return { ...turn, answer: turn.answer + event.data.text };
     case 'error':
       return { ...turn, error: event.data.message };
     case 'done': {
-      const { question_id: questionId, status, missing, clarifications, user_definitions: used, result } = event.data;
+      const { question_id: questionId, status, missing, clarifications, user_definitions: used, result, parts } =
+        event.data;
       return {
         ...turn,
         state: turn.error ? 'error' : 'done',
@@ -453,6 +482,7 @@ export function applyStreamEvent(turn: Turn, event: ChatStreamEvent): Turn {
         clarificationState: clarifications.length > 0 ? 'pending' : null,
         usedDefinitions: used,
         result: result ?? turn.result,
+        parts: parts && parts.length > 0 ? parts : turn.parts,
       };
     }
     default:

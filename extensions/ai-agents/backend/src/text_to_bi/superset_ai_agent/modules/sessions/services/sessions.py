@@ -42,6 +42,7 @@ def serialize_turn(question: AgentQuestion) -> dict[str, Any]:
         "clarification_state": question.clarification_state,
         "retry_of": question.retry_of,
         "result": question.query_result,
+        "parts": question.part_results or [],
         "asked_on": iso_datetime(question.created_on),
     }
 

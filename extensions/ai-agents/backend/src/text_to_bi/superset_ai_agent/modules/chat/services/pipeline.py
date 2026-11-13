@@ -1,9 +1,11 @@
 import json
+import re
 import time
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date
+from queue import Queue
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -17,12 +19,16 @@ from ..exceptions import QueryPlanError
 from . import prompts
 from .formula import answers_anything, doubtful_result, told_formula
 from .query import combined_result, plan_query, result_for_answer
-from .triage import TRIAGE_STATUSES, QuestionTriage, blocked_reply, checked_triage
+from .triage import TRIAGE_STATUSES, QuestionTriage, SubQuestion, blocked_reply, checked_triage
 
 MAX_HISTORY_TURNS = 3
 MAX_HISTORY_MESSAGE_LENGTH = 2000
 MISSING_KINDS = ("glossary", "metric", "expert_rule")
 WEEKDAYS = ("thứ Hai", "thứ Ba", "thứ Tư", "thứ Năm", "thứ Sáu", "thứ Bảy", "Chủ nhật")
+# Where a sequential sub-question uses what an earlier one found: {{q1}} is the first row of sub-question 1.
+PLACEHOLDER = re.compile(r"\{\{\s*q(\d+)\s*\}\}")
+PART_FAILED_MESSAGE = "Không trả lời được phần này do lỗi khi xử lý."
+PART_SKIPPED_MESSAGE = "Phần trước không có kết quả để dùng tiếp, nên phần này chưa trả lời được."
 
 Event = tuple[str, dict[str, Any]]
 # Runs one approved metric: (dataset_id, metric_id, {dimensions, filters}) -> the Semantic Layer's answer.
@@ -161,6 +167,10 @@ class AgentOutcome:
     result: dict[str, Any] | None = None
     query_error: str | None = None
     answer: str = ""
+    # A question split into sub-questions: each one answered (`parts`), and what each showed, in order, including the
+    # ones that failed or were skipped (`part_results`). The fields above then gather what the parts found.
+    parts: list["AgentOutcome"] = field(default_factory=list)
+    part_results: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def missing(self) -> list[str]:
@@ -168,10 +178,13 @@ class AgentOutcome:
 
         A glossary term is missing only for a concept nothing defines: a question fully described by an approved
         metric, such as "nhiệt độ trung bình tháng này", needs no term of its own. A concept the user confirmed on this
-        dashboard counts as the question's expert rule. A question answered without a query lacks nothing.
+        dashboard counts as the question's expert rule. A question answered without a query lacks nothing, and one split
+        into sub-questions lacks what any of them lacks.
         """
         if not self.answered_with_data:
             return []
+        if self.parts:
+            return [kind for kind in MISSING_KINDS if any(kind in part.missing for part in self.parts)]
         has_user_rule = any(item["kind"] == "expert_rule" for item in self.user_definitions)
         gaps = {
             "glossary": bool(self.undefined_concepts),
@@ -555,42 +568,25 @@ def _answer_without_query(
     yield from _streamed_answer(model, messages, outcome)
 
 
-def run_agent(
+def _answer_question(
+    first_step: int,
     question: str,
     history: list[dict[str, str]],
+    catalog: SemanticCatalog,
     model: Any,
-    load_catalog: Callable[[], SemanticCatalog],
-    user_definitions: Sequence[dict[str, Any]] = (),
-    run_metric: MetricRunner | None = None,
-    today: date | None = None,
-    builder: MetricBuilder | None = None,
-    dashboard: str | None = None,
-) -> Iterator[Event]:
-    """Run one question asked on the dashboard titled `dashboard`; `user_definitions` are what the user confirmed there.
+    user_definitions: Sequence[dict[str, Any]],
+    run_metric: MetricRunner | None,
+    today: date,
+    builder: MetricBuilder | None,
+    outcome: AgentOutcome,
+):
+    """Understand one single-intent question against the catalog, then answer it with approved metrics or say what is
+    missing. Its steps are numbered from `first_step`; returns the context the final answer is written from.
 
-    The question is classified first; only one answerable from the data goes on to the catalog and a metric query. With
-    a `builder`, a question that only lacks a metric climbs to the data model and builds one.
+    With a `builder`, a question that only lacks a metric climbs to the data model and builds one.
     """
-    today = today or date.today()
-    outcome = AgentOutcome()
     definitions_by_id = {item["id"]: item for item in user_definitions}
     user_rules_by_id = {item_id: item for item_id, item in definitions_by_id.items() if item["kind"] == "expert_rule"}
-
-    triage_input = _triage_input(question, history, dashboard)
-    triage = yield from _tool_call(
-        1, "classify_question", {"question": question, "history_turns": len(history) // 2},
-        lambda: checked_triage(_ask(model, QuestionTriage, prompts.CLASSIFY_QUESTION, triage_input)),
-        lambda value: value.model_dump(),
-    )
-    outcome.triage = triage.model_dump()
-    if triage.triage != "answerable":
-        yield from _answer_without_query(triage, question, history, dashboard, model, load_catalog, outcome)
-        return outcome
-    # Until sub-questions run one by one, a question split into several is still answered as asked, in one plan.
-    single_question = triage.sub_questions[0].text if triage.execution == "single" and triage.sub_questions else None
-    understood_question = single_question or question
-
-    catalog = yield from _tool_call(2, "load_semantic_catalog", {}, load_catalog, SemanticCatalog.summary)
     terms_by_id = {term["id"]: term for term in catalog.glossary_terms}
     metrics_by_key = {(metric["dataset_id"], metric["metric_id"]): metric for metric in catalog.metrics}
     rules_by_id = {rule["id"]: rule for rule in catalog.expert_rules}
@@ -598,7 +594,7 @@ def run_agent(
     understanding_input = "\n\n".join((
         _today_block(today),
         f"Lịch sử hội thoại:\n{_conversation(history)}",
-        f"Câu hỏi mới nhất: {understood_question}",
+        f"Câu hỏi mới nhất: {question}",
         _data_block("Thuật ngữ đã duyệt", _described(catalog.glossary_terms, TERM_FIELDS)),
         _data_block("Metric đã duyệt", _described(catalog.metrics, METRIC_FIELDS)),
         _data_block("Expert rule đã duyệt", _described(catalog.expert_rules, RULE_FIELDS)),
@@ -606,11 +602,11 @@ def run_agent(
         _data_block("Dataset: cột và giá trị có nhãn", catalog.datasets),
     ))
     understanding = yield from _tool_call(
-        3, "understand_question", {"question": understood_question, "history_turns": len(history) // 2},
+        first_step, "understand_question", {"question": question, "history_turns": len(history) // 2},
         lambda: _ask(model, Understanding, prompts.UNDERSTAND_QUESTION, understanding_input),
         lambda value: _understanding_shown(value, terms_by_id, metrics_by_key, rules_by_id, definitions_by_id),
     )
-    outcome.rewritten_question = understanding.standalone_question.strip() or understood_question
+    outcome.rewritten_question = understanding.standalone_question.strip() or question
     asked = outcome.rewritten_question
     chosen_terms = [terms_by_id[term_id] for term_id in _known(understanding.term_ids, terms_by_id)]
     outcome.glossary_terms = [{"id": term["id"], "name": term["name"]} for term in chosen_terms]
@@ -637,7 +633,7 @@ def run_agent(
     ]
 
     missing = outcome.missing
-    step = 4
+    step = first_step + 1
     used_definitions = [definitions_by_id[item["id"]] for item in outcome.user_definitions]
     rules = chosen_rules + _stored_conditions(used_definitions)
     built_metric = None
@@ -699,7 +695,6 @@ def run_agent(
 
     answered_metrics = chosen_metrics or ([built_metric] if built_metric else [])
     context = {
-        "today": iso_datetime(today),
         "question": asked,
         "glossary_terms": _described(chosen_terms, ("name", "definition")),
         "metrics": _described(answered_metrics, ("name", "definition", "unit")),
@@ -714,6 +709,235 @@ def run_agent(
         context["result"] = result_for_answer(outcome.result)
     if outcome.query_error:
         context["query_error"] = outcome.query_error
+    return context
+
+
+def _lead_value(result: dict[str, Any] | None) -> str | None:
+    """What a later sub-question takes from this result: the first row's first dimension, or its first figure.
+
+    A key no label names (no labelled values for its column) comes with its column, "thanh_pho_key = 1", so the later
+    sub-question can still filter on it rather than read a bare number.
+    """
+    if not result or not result["rows"]:
+        return None
+    row = result["rows"][0]
+    for dimension in result["dimensions"]:
+        value = row.get(dimension["name"])
+        if value in (None, ""):
+            continue
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and not dimension.get("temporal"):
+            return f"{dimension['name']} = {value}"
+        return str(value)
+    value = next((row[metric["name"]] for metric in result["metrics"] if row.get(metric["name"]) is not None), None)
+    return None if value is None else str(value)
+
+
+def _filled(sub_question: SubQuestion, results: dict[int, dict[str, Any] | None]) -> str | None:
+    """The sub-question with each {{q<id>}} replaced by what that earlier sub-question found; None when one of them
+    found nothing to go on."""
+    values = {part_id: _lead_value(result) for part_id, result in results.items()}
+    needed = {int(part_id) for part_id in PLACEHOLDER.findall(sub_question.text)} | set(sub_question.depends_on)
+    if any(values.get(part_id) is None for part_id in needed):
+        return None
+    return PLACEHOLDER.sub(lambda match: values[int(match.group(1))], sub_question.text)
+
+
+def _in_part(part_id: int, run: Iterator[Event]):
+    """One sub-question's events, told apart from the others': its tool calls carry the part and an ID of its own, and
+    its result waits for the `part_result` sent when it finishes."""
+    while True:
+        try:
+            name, data = next(run)
+        except StopIteration as finished:
+            return finished.value
+        if name in ("tool_start", "tool_end"):
+            yield name, {**data, "id": f"q{part_id}_{data['id']}", "part": part_id}
+        elif name != "result":
+            yield name, data
+
+
+def _concurrently(runs: list[Iterator[Event]]):
+    """Advance each run in a thread of its own and pass their events on as they come; returns what each run returned.
+
+    Every run catches its own failure, so an error reaching here is a bug and stops the answer.
+    """
+    if len(runs) <= 1:
+        # Nothing, or one run, to wait for: no thread is needed.
+        values = []
+        for run in runs:
+            values.append((yield from run))
+        return values
+    events: Queue = Queue()
+
+    def drain(index: int, run: Iterator[Event]) -> None:
+        try:
+            while True:
+                try:
+                    events.put(("event", index, next(run)))
+                except StopIteration as finished:
+                    events.put(("done", index, finished.value))
+                    return
+        except BaseException as error:  # noqa: BLE001
+            events.put(("error", index, error))
+
+    values: list[Any] = [None] * len(runs)
+    with ThreadPoolExecutor(max_workers=len(runs)) as pool:
+        for index, run in enumerate(runs):
+            pool.submit(drain, index, run)
+        remaining = len(runs)
+        while remaining:
+            kind, index, payload = events.get()
+            if kind == "event":
+                yield payload
+            elif kind == "error":
+                raise payload
+            else:
+                values[index] = payload
+                remaining -= 1
+    return values
+
+
+def _answer_part(sub_question: SubQuestion, text: str, answer: Callable[[str, AgentOutcome], Any]):
+    """Answer one sub-question; a failure is kept with it, so the other sub-questions still get answered."""
+    part = AgentOutcome()
+    try:
+        context = yield from _in_part(sub_question.id, answer(text, part))
+    except Exception as error:  # noqa: BLE001
+        return part, None, error
+    return part, context, None
+
+
+def _merge_parts(outcome: AgentOutcome) -> None:
+    """What the sub-questions found, gathered on the question so the log and the review list see all of it."""
+
+    def unique(items: list[dict[str, Any]], key: Callable[[dict[str, Any]], Any]) -> list[dict[str, Any]]:
+        return list({key(item): item for item in items}.values())
+
+    parts = outcome.parts
+    outcome.rewritten_question = "\n".join(part.rewritten_question or "" for part in parts).strip() or None
+    outcome.glossary_terms = unique([term for part in parts for term in part.glossary_terms], lambda item: item["id"])
+    outcome.undefined_concepts = list(dict.fromkeys(concept for part in parts for concept in part.undefined_concepts))
+    outcome.metrics = unique(
+        [metric for part in parts for metric in part.metrics], lambda item: (item["dataset_id"], item["metric_id"]),
+    )
+    outcome.expert_rules = unique([rule for part in parts for rule in part.expert_rules], lambda item: item["id"])
+    outcome.user_definitions = unique(
+        [definition for part in parts for definition in part.user_definitions], lambda item: item["id"],
+    )
+    outcome.requires_expert_rule = any(part.requires_expert_rule for part in parts)
+    outcome.clarifications = unique(
+        [draft for part in parts for draft in part.clarifications],
+        lambda item: (item["kind"], item["name"].casefold()),
+    )
+    outcome.suggestions = {}
+    for part in parts:
+        for kind, suggestion in part.suggestions.items():
+            outcome.suggestions.setdefault(kind, suggestion)
+
+
+def _part_shown(
+    part_id: int, question: str, part: AgentOutcome | None, query_error: str | None, skipped: str | None,
+) -> dict[str, Any]:
+    return {
+        "id": part_id, "question": question, "result": part.result if part else None,
+        "query_error": query_error, "skipped": skipped,
+    }
+
+
+def _answer_parts(triage: QuestionTriage, answer: Callable[[str, AgentOutcome], Any], outcome: AgentOutcome):
+    """Answer a question split into sub-questions, each on its own: those that need nothing not yet answered run side
+    by side, and a sequential one starts once the sub-questions it uses have answered.
+
+    A sub-question that fails keeps its error and the others go on; one whose source found nothing is skipped. Returns
+    each sub-question's answer context, in the classifier's order.
+    """
+    results: dict[int, dict[str, Any] | None] = {}
+    contexts: dict[int, dict[str, Any]] = {}
+    shown: dict[int, dict[str, Any]] = {}
+    first_error: Exception | None = None
+    waiting = list(triage.sub_questions)
+    while waiting:
+        ready = [item for item in waiting if all(part_id in results for part_id in item.depends_on)]
+        waiting = [item for item in waiting if item not in ready]
+        runs = []
+        for sub_question in ready:
+            text = _filled(sub_question, results)
+            if text is None:
+                unfilled = PLACEHOLDER.sub(lambda match: f"(kết quả ý {match.group(1)})", sub_question.text)
+                results[sub_question.id] = None
+                contexts[sub_question.id] = {"question": unfilled, "skipped": PART_SKIPPED_MESSAGE}
+                shown[sub_question.id] = _part_shown(sub_question.id, unfilled, None, None, PART_SKIPPED_MESSAGE)
+                yield "part_result", shown[sub_question.id]
+            else:
+                runs.append((sub_question, text))
+        answered = yield from _concurrently([_answer_part(item, text, answer) for item, text in runs])
+        for (sub_question, text), (part, context, error) in zip(runs, answered):
+            if error is None:
+                results[sub_question.id] = part.result
+                contexts[sub_question.id] = context
+                outcome.parts.append(part)
+                shown[sub_question.id] = _part_shown(sub_question.id, text, part, part.query_error, None)
+            else:
+                first_error = first_error or error
+                results[sub_question.id] = None
+                contexts[sub_question.id] = {"question": text, "query_error": PART_FAILED_MESSAGE}
+                shown[sub_question.id] = _part_shown(sub_question.id, text, None, PART_FAILED_MESSAGE, None)
+            yield "part_result", shown[sub_question.id]
+    if not outcome.parts and first_error is not None:
+        # Nothing was answered: the question fails as a whole, as a single question would have.
+        raise first_error
+    order = [item.id for item in triage.sub_questions]
+    outcome.part_results = [shown[part_id] for part_id in order]
+    _merge_parts(outcome)
+    return [contexts[part_id] for part_id in order]
+
+
+def run_agent(
+    question: str,
+    history: list[dict[str, str]],
+    model: Any,
+    load_catalog: Callable[[], SemanticCatalog],
+    user_definitions: Sequence[dict[str, Any]] = (),
+    run_metric: MetricRunner | None = None,
+    today: date | None = None,
+    builder: MetricBuilder | None = None,
+    dashboard: str | None = None,
+) -> Iterator[Event]:
+    """Run one question asked on the dashboard titled `dashboard`; `user_definitions` are what the user confirmed there.
+
+    The question is classified first; only one answerable from the data goes on to the catalog and a metric query. A
+    question split into sub-questions answers each on its own (docs/specs/taxonomy-cau-hoi.md §6), and the final
+    answer takes them in turn.
+    """
+    today = today or date.today()
+    outcome = AgentOutcome()
+
+    triage_input = _triage_input(question, history, dashboard)
+    triage = yield from _tool_call(
+        1, "classify_question", {"question": question, "history_turns": len(history) // 2},
+        lambda: checked_triage(_ask(model, QuestionTriage, prompts.CLASSIFY_QUESTION, triage_input)),
+        lambda value: value.model_dump(),
+    )
+    outcome.triage = triage.model_dump()
+    if triage.triage != "answerable":
+        yield from _answer_without_query(triage, question, history, dashboard, model, load_catalog, outcome)
+        return outcome
+
+    catalog = yield from _tool_call(2, "load_semantic_catalog", {}, load_catalog, SemanticCatalog.summary)
+    if triage.execution in ("parallel", "sequential"):
+
+        def answer(text: str, part: AgentOutcome):
+            # Each sub-question already stands on its own, so it is understood without the conversation.
+            return _answer_question(3, text, [], catalog, model, user_definitions, run_metric, today, builder, part)
+
+        parts = yield from _answer_parts(triage, answer, outcome)
+        context = {"today": iso_datetime(today), "question": question, "parts": parts}
+    else:
+        understood_question = triage.sub_questions[0].text if triage.sub_questions else question
+        answered = yield from _answer_question(
+            3, understood_question, history, catalog, model, user_definitions, run_metric, today, builder, outcome,
+        )
+        context = {"today": iso_datetime(today), **answered}
     if triage.set_aside:
         context["set_aside"] = [part.model_dump() for part in triage.set_aside]
     answer_prompt = [("system", prompts.FINAL_ANSWER), ("human", _data_block("Bối cảnh trả lời", context))]

@@ -104,8 +104,9 @@ truy vấn.
   khoảng thời gian mặc định) bằng lời thường.
 - Hỏi có những số liệu gì: liệt kê ngắn các chỉ số theo nhóm hợp lý, mỗi chỉ số một dòng kèm đơn vị.
 - Hỏi dữ liệu đến ngày nào: dùng `time_ranges` của dataset, ghi ngày dạng dd/mm/yyyy.
-- Catalog không có thông tin được hỏi: nói rõ là chưa có.
-Viết bằng tiếng Việt, xưng "tôi" và gọi "bạn", ngắn gọn. Không nêu tên cột kỹ thuật, không bịa số liệu.
+- Không có thông tin được hỏi: nói rõ là hệ thống chưa có định nghĩa hay số liệu đó.
+Viết bằng tiếng Việt, xưng "tôi" và gọi "bạn", ngắn gọn. Không nêu tên cột kỹ thuật, không dùng từ "catalog", không
+bịa số liệu.
 {DATA_NOTICE}"""
 
 UNDERSTAND_QUESTION = f"""Bạn là bộ phân tích câu hỏi của một trợ lý dữ liệu. Trong một lần trả lời, bạn hiểu câu hỏi,
@@ -249,6 +250,10 @@ Khi có `result`:
   lọc sai giá trị nên chưa phản ánh đúng dữ liệu. Không khẳng định "không có" hay "bằng 0"; nói kết quả tạm tính chưa
   đáng tin, mời người dùng xem cách tính bên dưới và cho biết đã chuyển quản trị viên kiểm tra.
 Khi có `query_error`: nói ngắn rằng chưa lấy được số liệu và lý do, rồi nêu cách hiểu câu hỏi.
+Khi có `parts` (câu hỏi gồm nhiều ý): mỗi phần là một câu hỏi con với `question` và bối cảnh riêng có các trường như
+trên (`result`, `query_error`, `missing`, `clarifications`, `suggestions`…). Trả lời lần lượt từng phần theo thứ tự,
+mỗi phần một đoạn ngắn theo đúng các quy tắc trên cho bối cảnh của chính phần đó; không gộp số liệu của các phần với
+nhau. Phần có `skipped` hoặc `query_error`: nói ngắn vì sao phần đó chưa trả lời được.
 Khi có `set_aside`: đó là phần câu hỏi không được trả lời ở đây (`out_of_domain`: dashboard không có dữ liệu đó,
 `unsupported`: chưa làm được việc đó, `metadata`: hỏi về định nghĩa, mời hỏi riêng); nói ngắn một câu ở cuối.
 Khi không có `result`:

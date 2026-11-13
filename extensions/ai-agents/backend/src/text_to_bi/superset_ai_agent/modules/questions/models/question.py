@@ -52,6 +52,8 @@ class AgentQuestion(BaseModel):
     retry_of = Column(Integer, nullable=True)
     # The table the metric query answered with: its filters, dimensions, metrics and rows.
     query_result = Column(JSON, nullable=True)
+    # A question split into sub-questions: per sub-question, its text and its table, error or reason it was skipped.
+    part_results = Column(JSON, nullable=True)
     created_on = Column(DateTime(timezone=True), nullable=False, index=True, default=lambda: datetime.now(timezone.utc))
 
 
