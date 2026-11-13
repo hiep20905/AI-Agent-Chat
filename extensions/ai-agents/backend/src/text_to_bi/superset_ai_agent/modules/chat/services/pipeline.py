@@ -17,6 +17,7 @@ from ..exceptions import QueryPlanError
 from . import prompts
 from .formula import answers_anything, doubtful_result, told_formula
 from .query import combined_result, plan_query, result_for_answer
+from .triage import TRIAGE_STATUSES, QuestionTriage, blocked_reply, checked_triage
 
 MAX_HISTORY_TURNS = 3
 MAX_HISTORY_MESSAGE_LENGTH = 2000
@@ -143,6 +144,8 @@ class MetricBuilder:
 
 @dataclass
 class AgentOutcome:
+    # How the question was classified before anything was looked up (docs/specs/taxonomy-cau-hoi.md).
+    triage: dict[str, Any] | None = None
     rewritten_question: str | None = None
     glossary_terms: list[dict[str, Any]] = field(default_factory=list)
     # Business concepts the question uses that no approved term, metric or rule defines; only these make a term missing.
@@ -165,8 +168,10 @@ class AgentOutcome:
 
         A glossary term is missing only for a concept nothing defines: a question fully described by an approved
         metric, such as "nhiệt độ trung bình tháng này", needs no term of its own. A concept the user confirmed on this
-        dashboard counts as the question's expert rule.
+        dashboard counts as the question's expert rule. A question answered without a query lacks nothing.
         """
+        if not self.answered_with_data:
+            return []
         has_user_rule = any(item["kind"] == "expert_rule" for item in self.user_definitions)
         gaps = {
             "glossary": bool(self.undefined_concepts),
@@ -177,7 +182,13 @@ class AgentOutcome:
         return [kind for kind in MISSING_KINDS if gaps[kind]]
 
     @property
+    def answered_with_data(self) -> bool:
+        return self.triage is None or self.triage["triage"] == "answerable"
+
+    @property
     def status(self) -> str:
+        if not self.answered_with_data:
+            return TRIAGE_STATUSES[self.triage["triage"]]
         return "needs_review" if self.missing else "resolved"
 
 
@@ -489,6 +500,61 @@ def _propose_dataset(
     return step + 1
 
 
+def _conversation(history: list[dict[str, str]]) -> str:
+    return "\n".join(f"{item['role']}: {item['content']}" for item in history) or "(chưa có)"
+
+
+def _triage_input(question: str, history: list[dict[str, str]], dashboard: str | None) -> str:
+    return "\n\n".join((
+        f"Dashboard: {dashboard or '(không rõ tên)'}",
+        f"Lịch sử hội thoại:\n{_conversation(history)}",
+        f"Câu hỏi mới nhất: {question}",
+    ))
+
+
+def _streamed_answer(model: Any, messages: list[tuple[str, str]], outcome: AgentOutcome) -> Iterator[Event]:
+    for chunk in model.stream(messages):
+        text = chunk.content if isinstance(chunk.content, str) else ""
+        if text:
+            outcome.answer += text
+            yield "token", {"text": text}
+
+
+def _answer_without_query(
+    triage: QuestionTriage,
+    question: str,
+    history: list[dict[str, str]],
+    dashboard: str | None,
+    model: Any,
+    load_catalog: Callable[[], SemanticCatalog],
+    outcome: AgentOutcome,
+) -> Iterator[Event]:
+    """Answer a question no metric query answers: refuse a blocked one, describe the data, or reply in a sentence.
+
+    A blocked question gets a fixed reply and reaches no model; only a question about the data reads the catalog.
+    """
+    outcome.requires_expert_rule = False
+    if triage.triage == "blocked":
+        outcome.answer = blocked_reply(triage)
+        yield "token", {"text": outcome.answer}
+        return
+    if triage.triage == "metadata":
+        catalog = yield from _tool_call(2, "load_semantic_catalog", {}, load_catalog, SemanticCatalog.summary)
+        context = {
+            "dashboard": dashboard,
+            "conversation": _conversation(history),
+            "question": question,
+            "metrics": _described(catalog.metrics, ("name", "definition", "unit", "query_defaults")),
+            "glossary_terms": _described(catalog.glossary_terms, ("name", "synonyms", "definition")),
+            "datasets": _described(catalog.datasets, ("name", "time_ranges")),
+        }
+        messages = [("system", prompts.DATA_DESCRIPTION), ("human", _data_block("Câu hỏi và catalog", context))]
+    else:
+        context = {"triage": triage.triage, "dashboard": dashboard, "question": question}
+        messages = [("system", prompts.DECLINED_REPLY), ("human", _data_block("Câu hỏi", context))]
+    yield from _streamed_answer(model, messages, outcome)
+
+
 def run_agent(
     question: str,
     history: list[dict[str, str]],
@@ -498,26 +564,41 @@ def run_agent(
     run_metric: MetricRunner | None = None,
     today: date | None = None,
     builder: MetricBuilder | None = None,
+    dashboard: str | None = None,
 ) -> Iterator[Event]:
-    """Run one question; `user_definitions` are what the user confirmed on this dashboard.
+    """Run one question asked on the dashboard titled `dashboard`; `user_definitions` are what the user confirmed there.
 
-    With a `builder`, a question that only lacks a metric climbs to the data model and builds one (step 3).
+    The question is classified first; only one answerable from the data goes on to the catalog and a metric query. With
+    a `builder`, a question that only lacks a metric climbs to the data model and builds one.
     """
     today = today or date.today()
     outcome = AgentOutcome()
     definitions_by_id = {item["id"]: item for item in user_definitions}
     user_rules_by_id = {item_id: item for item_id, item in definitions_by_id.items() if item["kind"] == "expert_rule"}
 
-    catalog = yield from _tool_call(1, "load_semantic_catalog", {}, load_catalog, SemanticCatalog.summary)
+    triage_input = _triage_input(question, history, dashboard)
+    triage = yield from _tool_call(
+        1, "classify_question", {"question": question, "history_turns": len(history) // 2},
+        lambda: checked_triage(_ask(model, QuestionTriage, prompts.CLASSIFY_QUESTION, triage_input)),
+        lambda value: value.model_dump(),
+    )
+    outcome.triage = triage.model_dump()
+    if triage.triage != "answerable":
+        yield from _answer_without_query(triage, question, history, dashboard, model, load_catalog, outcome)
+        return outcome
+    # Until sub-questions run one by one, a question split into several is still answered as asked, in one plan.
+    single_question = triage.sub_questions[0].text if triage.execution == "single" and triage.sub_questions else None
+    understood_question = single_question or question
+
+    catalog = yield from _tool_call(2, "load_semantic_catalog", {}, load_catalog, SemanticCatalog.summary)
     terms_by_id = {term["id"]: term for term in catalog.glossary_terms}
     metrics_by_key = {(metric["dataset_id"], metric["metric_id"]): metric for metric in catalog.metrics}
     rules_by_id = {rule["id"]: rule for rule in catalog.expert_rules}
 
-    conversation = "\n".join(f"{item['role']}: {item['content']}" for item in history) or "(chưa có)"
     understanding_input = "\n\n".join((
         _today_block(today),
-        f"Lịch sử hội thoại:\n{conversation}",
-        f"Câu hỏi mới nhất: {question}",
+        f"Lịch sử hội thoại:\n{_conversation(history)}",
+        f"Câu hỏi mới nhất: {understood_question}",
         _data_block("Thuật ngữ đã duyệt", _described(catalog.glossary_terms, TERM_FIELDS)),
         _data_block("Metric đã duyệt", _described(catalog.metrics, METRIC_FIELDS)),
         _data_block("Expert rule đã duyệt", _described(catalog.expert_rules, RULE_FIELDS)),
@@ -525,11 +606,11 @@ def run_agent(
         _data_block("Dataset: cột và giá trị có nhãn", catalog.datasets),
     ))
     understanding = yield from _tool_call(
-        2, "understand_question", {"question": question, "history_turns": len(history) // 2},
+        3, "understand_question", {"question": understood_question, "history_turns": len(history) // 2},
         lambda: _ask(model, Understanding, prompts.UNDERSTAND_QUESTION, understanding_input),
         lambda value: _understanding_shown(value, terms_by_id, metrics_by_key, rules_by_id, definitions_by_id),
     )
-    outcome.rewritten_question = understanding.standalone_question.strip() or question
+    outcome.rewritten_question = understanding.standalone_question.strip() or understood_question
     asked = outcome.rewritten_question
     chosen_terms = [terms_by_id[term_id] for term_id in _known(understanding.term_ids, terms_by_id)]
     outcome.glossary_terms = [{"id": term["id"], "name": term["name"]} for term in chosen_terms]
@@ -556,7 +637,7 @@ def run_agent(
     ]
 
     missing = outcome.missing
-    step = 3
+    step = 4
     used_definitions = [definitions_by_id[item["id"]] for item in outcome.user_definitions]
     rules = chosen_rules + _stored_conditions(used_definitions)
     built_metric = None
@@ -633,10 +714,8 @@ def run_agent(
         context["result"] = result_for_answer(outcome.result)
     if outcome.query_error:
         context["query_error"] = outcome.query_error
+    if triage.set_aside:
+        context["set_aside"] = [part.model_dump() for part in triage.set_aside]
     answer_prompt = [("system", prompts.FINAL_ANSWER), ("human", _data_block("Bối cảnh trả lời", context))]
-    for chunk in model.stream(answer_prompt):
-        text = chunk.content if isinstance(chunk.content, str) else ""
-        if text:
-            outcome.answer += text
-            yield "token", {"text": text}
+    yield from _streamed_answer(model, answer_prompt, outcome)
     return outcome

@@ -112,8 +112,8 @@ def test_a_question_only_missing_a_metric_builds_one_on_an_aggregate_and_answers
     outcome, events, model = _run(answers, builder, semantic_layer)
 
     assert _steps(events) == [
-        "load_semantic_catalog", "understand_question", "load_data_model", "draft_metric", "create_metric",
-        "query_metrics",
+        "classify_question", "load_semantic_catalog", "understand_question", "load_data_model", "draft_metric",
+        "create_metric", "query_metrics",
     ]
     assert builder.created[0]["expression"] == GUST
     assert builder.created[0]["question"] == "Gió giật mạnh nhất ở các thành phố tuần trước là bao nhiêu?"
@@ -191,7 +191,7 @@ def test_with_no_aggregate_for_it_a_dataset_over_base_tables_goes_to_administrat
 
     outcome, events, model = _run(answers, builder, semantic_layer)
 
-    assert _steps(events)[2:] == ["load_data_model", "draft_metric", "draft_dataset", "propose_dataset"]
+    assert _steps(events)[3:] == ["load_data_model", "draft_metric", "draft_dataset", "propose_dataset"]
     assert builder.proposed[0]["sql"] == LOAD_DRAFT.sql and builder.proposed[0]["metric"]["metric_name"] == "so_lan_nap"
     assert builder.proposed[0]["question"] == "Tuần trước có bao nhiêu lần nạp dữ liệu?"
     assert semantic_layer.calls == [] and outcome.result is None and builder.created == []

@@ -56,15 +56,32 @@ numbers, and logs the question so administrators can fill the gaps:
 
 1. The browser sends the question and its conversation; the server reads the
    conversation's last three answered turns from the log.
-2. `load_semantic_catalog` reads the Semantic Layer's consumer endpoints
+2. `classify_question` is one model call that sees only the question, the
+   conversation and the dashboard's title, never the catalog, and labels the
+   question on the four axes of `docs/specs/taxonomy-cau-hoi.md`
+   (`modules/chat/services/triage.py`): whether data answers it, the intent of
+   each part, how it splits into single-intent `sub_questions` (at most four,
+   `parallel` or `sequential` through `depends_on`), and how it relates to the
+   previous turn. `checked_triage` makes the labels consistent instead of
+   trusting them. Only an `answerable` question goes on. A `blocked` one
+   (`injection`, `write`, `pii`, `access`, `harmful`) gets a fixed reply and
+   reaches no other model call; `chitchat`, `out_of_domain`, `unsupported` and
+   `unclear` get a one to three sentence reply (`DECLINED_REPLY`) without the
+   catalog; `metadata` (how a metric is computed, what data there is, up to
+   when) is answered from the catalog (`DATA_DESCRIPTION`) without a query.
+   Parts set aside from an answerable question (`set_aside`) are mentioned at
+   the end of its answer.
+3. `load_semantic_catalog` reads the Semantic Layer's consumer endpoints
    (`/semantic-catalog`, `/glossary/discovery`, `/expert-rules/discover`, then
    `/dataset/<id>/dimension-members` for each dataset with approved metrics) in
    parallel over HTTP inside the container, forwarding the user's session
    cookie, so the agent only sees approved content on datasets that user may
    access. The catalog is cached per user for 60 seconds.
-3. `understand_question` is one model call that does what used to be four
-   steps: it rewrites a follow-up into a standalone question; picks the glossary
-   terms, metrics, expert rules and the user's own definitions the question is
+4. `understand_question` is one model call that does what used to be four
+   steps. It reads the classifier's sub-question when there is exactly one, so
+   greetings and parts set aside are gone; a question split in several is read
+   as asked until sub-questions run one by one. The call rewrites a follow-up
+   into a standalone question; picks the glossary terms, metrics, expert rules and the user's own definitions the question is
    about (IDs it invents are dropped); lists `undefined_concepts` (business
    concepts nothing defines; time, place and aggregation words do not count);
    classifies the question as `qualitative` (worded by perception with a vague
@@ -79,7 +96,7 @@ numbers, and logs the question so administrators can fill the gaps:
    catalog's `time_ranges` (first and last date of each dataset date column, from
    `dimension-members`) let it pick dates the data covers. The model runs with
    `reasoning_effort="low"`.
-4. When only a metric is missing, the agent climbs from approved content to the
+5. When only a metric is missing, the agent climbs from approved content to the
    data model (`run_agent(..., builder=MetricBuilder(...))`). A missing term or
    rule is always asked back first.
    - `load_data_model` reads the Semantic Layer's `/agent-sources`: aggregate
@@ -121,7 +138,7 @@ numbers, and logs the question so administrators can fill the gaps:
      (`clarifications`) and a metric proposal for administrators
      (`suggestions`), and no query runs. A failure here is reported but does not
      stop the answer.
-5. Otherwise `query_metrics` checks the plan against the catalog
+6. Otherwise `query_metrics` checks the plan against the catalog
    (`modules/chat/services/query.py`): only listed columns, filterable or groupable as
    used, and the supported operators. An approved expert rule's filters come
    from the rule's own conditions, never from the model's copy of them, and a
@@ -151,7 +168,7 @@ numbers, and logs the question so administrators can fill the gaps:
    data's grain with a note. The `applied_defaults` of each answer become
    the result's `defaults`, and a default time window adds a note naming
    the period, so the answer says which period it used.
-6. The final answer streams as tokens, written for a business user from the
+7. The final answer streams as tokens, written for a business user from the
    numbers in the result: the direct answer first, then the criterion and
    whether it is the business's shared definition or the user's own, "theo dự
    báo" for dates after today.
@@ -162,9 +179,11 @@ existing). Each step then reaches the browser as a tool call (`tool_start`,
 `done` event. A question is `resolved` when it found at least one metric, has no
 `undefined_concepts`, and has an approved or user's expert rule if it is
 qualitative; otherwise it is `needs_review` with `missing` listing what was not
-found. `done` also carries `clarifications`, the `user_definitions` used,
-`result` and `query_error`. The log stores `requires_expert_rule` (NULL on older
-questions), `suggestions`, `clarifications` with `clarification_state`
+found. A question answered without a query lacks nothing: `metadata` and
+`chitchat` are `resolved`, `out_of_domain`, `unsupported` and `unclear` are
+`declined`, and `blocked` is `blocked`. `done` also carries `clarifications`, the `user_definitions` used,
+`result` and `query_error`. The log stores `triage` (the classifier's labels, NULL on
+older questions), `requires_expert_rule` (NULL on older questions), `suggestions`, `clarifications` with `clarification_state`
 (`pending`, `confirmed`, `dismissed`), `retry_of` on the answer given again after
 a confirmation, and `query_result`. A metric proposal opens on the Metrics page,
 because metrics are created in the Superset dataset editor.

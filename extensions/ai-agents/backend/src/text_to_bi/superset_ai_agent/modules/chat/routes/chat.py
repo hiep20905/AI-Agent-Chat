@@ -20,7 +20,7 @@ from ...semantic_layer.services.catalog import cached_semantic_catalog
 from ...semantic_layer.services.data_model import cached_data_model_sources, propose_agent_dataset
 from ...semantic_layer.services.metrics import create_agent_metric, run_metric_query
 from ...sessions.services.sessions import require_own_session, start_session, touch_session
-from ...superset.services.dashboards import require_dashboard_access
+from ...superset.services.dashboards import dashboard_titles, require_dashboard_access
 from ..services.conversation import asked_question, log_question, parse_chat_request, record_tool_call, session_history
 from ..services.pipeline import AgentOutcome, MetricBuilder, run_agent
 
@@ -69,6 +69,8 @@ class TextToBIAgentAPI(RestApi):
         session_id = chat_session.id
         history = session_history(session_id, retry_of)
         user_definitions = definitions_for_agent(user_id, dashboard_id)
+        # The dashboard's title tells the question classifier what the data is about.
+        dashboard_title = dashboard_titles({dashboard_id}).get(dashboard_id)
         # The Semantic Layer is read and its metrics run as this user, so forward their session and CSRF token.
         cookie_header = request.headers.get("Cookie", "")
         csrf_token = request.headers.get("X-CSRFToken", "")
@@ -93,6 +95,7 @@ class TextToBIAgentAPI(RestApi):
                         create_metric=lambda draft: create_agent_metric(draft, cookie_header, csrf_token),
                         propose_dataset=lambda draft: propose_agent_dataset(draft, cookie_header, csrf_token),
                     ),
+                    dashboard=dashboard_title,
                 )
                 while True:
                     try:

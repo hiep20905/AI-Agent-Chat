@@ -17,7 +17,10 @@ DASHBOARD_SLUG = "ai-agent-tong-quan"
 DASHBOARD_TITLE = "Tổng quan AI Agent"
 REPORT_TIMEZONE = "Asia/Ho_Chi_Minh"
 MANAGED_MARKER = json.dumps({"managed_by": "governance_bootstrap"})
-STATUS_COLORS = {"Thành công": "#0ca30c", "Cần xác nhận": "#fab219", "Lỗi": "#d03b3b"}
+STATUS_COLORS = {
+    "Thành công": "#0ca30c", "Cần xác nhận": "#fab219", "Ngoài phạm vi": "#8c8c8c", "Bị chặn": "#5b3fb5",
+    "Lỗi": "#d03b3b",
+}
 
 # Mirrors the AI Agent's AgentQuestion and AgentQuestionHandling models, so the views exist before the first
 # question is asked. The agent creates the same tables with `checkfirst`, so whichever runs first wins.
@@ -27,6 +30,7 @@ CREATE TABLE IF NOT EXISTS public.text_to_bi_agent_question (
     user_id INTEGER,
     dashboard_id INTEGER,
     question TEXT NOT NULL,
+    triage JSON,
     rewritten_question TEXT,
     history_turns INTEGER NOT NULL,
     glossary_terms JSON NOT NULL,
@@ -55,6 +59,7 @@ ALTER TABLE public.text_to_bi_agent_question ADD COLUMN IF NOT EXISTS clarificat
 ALTER TABLE public.text_to_bi_agent_question ADD COLUMN IF NOT EXISTS clarification_state VARCHAR(20);
 ALTER TABLE public.text_to_bi_agent_question ADD COLUMN IF NOT EXISTS retry_of INTEGER;
 ALTER TABLE public.text_to_bi_agent_question ADD COLUMN IF NOT EXISTS query_result JSON;
+ALTER TABLE public.text_to_bi_agent_question ADD COLUMN IF NOT EXISTS triage JSON;
 CREATE INDEX IF NOT EXISTS ix_text_to_bi_agent_question_created_on ON public.text_to_bi_agent_question (created_on);
 CREATE INDEX IF NOT EXISTS ix_text_to_bi_agent_question_status ON public.text_to_bi_agent_question (status);
 CREATE INDEX IF NOT EXISTS ix_text_to_bi_agent_question_user_id ON public.text_to_bi_agent_question (user_id);
@@ -96,7 +101,8 @@ SELECT
     q.question,
     q.rewritten_question,
     q.status,
-    CASE q.status WHEN 'resolved' THEN 'Thành công' WHEN 'needs_review' THEN 'Cần xác nhận' ELSE 'Lỗi' END
+    CASE q.status WHEN 'resolved' THEN 'Thành công' WHEN 'needs_review' THEN 'Cần xác nhận'
+        WHEN 'declined' THEN 'Ngoài phạm vi' WHEN 'blocked' THEN 'Bị chặn' ELSE 'Lỗi' END
         AS status_label,
     (SELECT string_agg({MISSING_LABEL.format(value="kind")}, ', ')
         FROM json_array_elements_text(q.missing) AS kind) AS missing_items,
@@ -134,7 +140,8 @@ WITH days AS (
     )::date AS asked_on
 ),
 outcomes (status, status_label) AS (
-    VALUES ('resolved', 'Thành công'), ('needs_review', 'Cần xác nhận'), ('failed', 'Lỗi')
+    VALUES ('resolved', 'Thành công'), ('needs_review', 'Cần xác nhận'), ('declined', 'Ngoài phạm vi'),
+        ('blocked', 'Bị chặn'), ('failed', 'Lỗi')
 )
 SELECT days.asked_on, outcomes.status, outcomes.status_label, count(q.id) AS question_count
 FROM days

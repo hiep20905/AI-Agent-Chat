@@ -1,13 +1,13 @@
 # Đặc tả: Taxonomy câu hỏi của người dùng
 
-Trạng thái: **nháp, chờ duyệt** · Ngày: 13/11/2026 · Phạm vi: AI Agent (bước phân loại và guardrail đứng trước
-`understand_question`)
+Trạng thái: **đang làm**, bước 2 và 3 ở mục 12 đã làm · Ngày: 13/11/2026 · Phạm vi: AI Agent (bước phân loại và
+guardrail đứng trước `understand_question`)
 
 ## 1. Vấn đề
 
 Hiện AI Agent đưa mọi câu hỏi vào cùng một luồng: đọc catalog, một lần gọi model `understand_question`, rồi chạy
-metric. Câu hỏi chỉ được chia làm hai loại `qualitative` / `quantitative` (`modules/chat/services/pipeline.py`, `Understanding`).
-Hệ quả:
+metric. Câu hỏi chỉ được chia làm hai loại `qualitative` / `quantitative` (`modules/chat/services/pipeline.py`,
+`Understanding`). Hệ quả:
 
 - Câu chào hỏi, câu ngoài miền dữ liệu ("giá vàng hôm nay") hay câu cố đổi chỉ dẫn hệ thống vẫn đi hết luồng, đọc
   catalog và gọi model với toàn bộ metadata.
@@ -191,7 +191,7 @@ class QuestionTriage(BaseModel):
 
 Kiểm tra trong code, không tin model:
 
-- `blocked_reason` có khi và chỉ khi `triage` là `blocked`.
+- `blocked_reason` chỉ giữ khi `triage` là `blocked`. Câu bị chặn mà thiếu lý do nhận câu từ chối chung.
 - `sub_questions` không rỗng khi và chỉ khi `triage` là `answerable`. Quá 4 câu thì cắt.
 - `execution` là `single` khi có đúng một câu con. Có `depends_on` thì là `sequential`.
 - `depends_on` chỉ trỏ tới `id` nhỏ hơn, không có vòng.
@@ -221,8 +221,13 @@ Câu hỏi + 3 lượt gần nhất + mô tả miền dashboard
 Phân loại đứng trước catalog vì rẻ hơn (không gửi metadata), và chặn được câu cố đổi chỉ dẫn trước khi model thấy dữ
 liệu. Với câu `single` và `follow_up` là `new`, bước [2] chạy đúng như luồng hiện có.
 
-Ghi log: thêm `triage`, `blocked_reason`, `follow_up`, `execution` và ý định từng câu con vào nhật ký câu hỏi
-(`text_to_bi_agent_question`), để dashboard "Tổng quan AI Agent" và benchmark dùng.
+Câu bị chặn nhận câu từ chối viết sẵn trong code (`BLOCKED_REPLIES`), không đi qua model nào nữa. Các nhánh không
+truy vấn khác trả lời bằng một lần gọi model ngắn.
+
+Ghi log: cột JSON `triage` của nhật ký câu hỏi (`text_to_bi_agent_question`) lưu toàn bộ nhãn, để dashboard "Tổng
+quan AI Agent" và benchmark dùng. Câu trả lời không qua truy vấn không thiếu gì (`missing` rỗng). Trạng thái:
+`metadata` và `chitchat` là `resolved`; `out_of_domain`, `unsupported`, `unclear` là `declined` ("Ngoài phạm vi");
+`blocked` là `blocked` ("Bị chặn").
 
 ## 10. Bộ câu ví dụ gán nhãn
 
@@ -252,8 +257,10 @@ Mỗi dòng có các trường `id`, `question`, `history` (nếu có, danh sác
 ## 12. Các bước triển khai
 
 1. Duyệt đặc tả này và bộ câu ví dụ.
-2. Thêm model `QuestionTriage`, prompt phân loại và phần kiểm tra đầu ra; test với model giả.
-3. Nối bước phân loại vào `run_agent`: các nhánh không phải `answerable` trả lời ngay.
+2. **Đã làm.** Thêm model `QuestionTriage`, prompt phân loại và phần kiểm tra đầu ra; test với model giả.
+3. **Đã làm.** Nối bước phân loại vào `run_agent`: các nhánh không phải `answerable` trả lời ngay. Câu có đúng một
+   câu con được hiểu theo câu con đó; câu tách thành nhiều câu con tạm vẫn được hiểu nguyên văn trong một kế hoạch
+   cho tới bước 4.
 4. Chạy câu con song song hoặc tuần tự, ghép kết quả trong `FINAL_ANSWER`; sự kiện SSE và giao diện cho câu con.
 5. Kiểm tra PII lớp 2.
 6. Ghi log các nhãn; đo độ chính xác trên bộ câu ví dụ.
@@ -262,7 +269,7 @@ Mỗi dòng có các trường `id`, `question`, `history` (nếu có, danh sác
 
 1. **PII lớp 2**: chặn hẳn câu hỏi chạm vào cột hoặc dataset `contains_pii`, hay cho phép số tổng hợp (đếm, trung
    bình) nhưng không hiện giá trị từng dòng?
-2. **`metadata`**: trả lời ngay từ catalog (đề xuất), hay vẫn đưa vào luồng hiện có?
+2. **`metadata`**: trả lời ngay từ catalog (đề xuất, đang làm theo cách này), hay vẫn đưa vào luồng hiện có?
 3. **Số câu con tối đa**: 4 có đủ không?
 4. **`diagnostic` và `correlation`**: làm trong đợt này, hay tạm trả lời bằng phần số liệu (`comparison`,
    `breakdown`) và nói rõ hệ thống không kết luận nguyên nhân?

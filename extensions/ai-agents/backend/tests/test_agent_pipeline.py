@@ -4,18 +4,25 @@ from types import SimpleNamespace
 import pytest
 
 from text_to_bi.superset_ai_agent.modules.chat.services import pipeline
+from text_to_bi.superset_ai_agent.modules.chat.services.triage import QuestionTriage
 from text_to_bi.superset_ai_agent.modules.semantic_layer.services.catalog import (
     SemanticCatalog,
     flatten_catalog,
     rule_filters,
 )
 
+# A question the classifier sends on as asked: answerable, with no sub-question of its own.
+AS_ASKED = QuestionTriage(triage="answerable")
+
 
 class FakeModel:
-    """Answers each structured step from a table keyed by schema, and streams a fixed final answer."""
+    """Answers each structured step from a table keyed by schema, and streams a fixed final answer.
+
+    Unless a test says otherwise, the question is classified as answerable as asked.
+    """
 
     def __init__(self, answers):
-        self.answers = answers
+        self.answers = {"QuestionTriage": AS_ASKED, **answers}
         self.prompts = []
 
     def with_structured_output(self, schema):
@@ -28,6 +35,10 @@ class FakeModel:
     def stream(self, messages):
         self.prompts.append(("final", messages))
         return [SimpleNamespace(content="Đã "), SimpleNamespace(content="xác định.")]
+
+    def prompt(self, schema_name):
+        """The human message the step with this schema (or `final`) was given."""
+        return next(messages for name, messages in self.prompts if name == schema_name)[1][1]
 
 
 DATASET = {
@@ -143,9 +154,9 @@ def test_one_understanding_step_then_the_query_and_the_streamed_answer():
     outcome, events, model = _run(_answers(), run_metric=semantic_layer)
 
     names = [data["name"] for name, data in events if name == "tool_start"]
-    assert names == ["load_semantic_catalog", "understand_question", "query_metrics"]
-    assert [data["status"] for name, data in events if name == "tool_end"] == ["ok"] * 3
-    assert [schema for schema, _ in model.prompts] == ["Understanding", "final"]
+    assert names == ["classify_question", "load_semantic_catalog", "understand_question", "query_metrics"]
+    assert [data["status"] for name, data in events if name == "tool_end"] == ["ok"] * 4
+    assert [schema for schema, _ in model.prompts] == ["QuestionTriage", "Understanding", "final"]
     understood = next(data for name, data in events if name == "tool_end" and data["name"] == "understand_question")
     assert understood["result"]["question_kind"] == "qualitative"
     assert understood["result"]["expert_rules"] == ["Ngày nắng nóng gay gắt"]
@@ -232,7 +243,7 @@ def test_a_quantitative_question_needs_no_expert_rule():
 def test_the_understanding_prompt_carries_today_the_catalog_and_the_labelled_values():
     _, _, model = _run(_answers(term_ids=(), question_kind="quantitative"))
 
-    prompt = model.prompts[0][1][1][1]
+    prompt = model.prompt("Understanding")
     assert '"today": "2026-10-26"' in prompt and "thứ Hai" in prompt
     assert all(text in prompt for text in ("Nhiệt độ cao nhất", "Nóng.", "Ngày nắng nóng gay gắt", "Ha Noi"))
 
@@ -265,7 +276,7 @@ def test_definitions_the_user_confirmed_count_for_the_rest_of_the_conversation()
 
     assert (outcome.status, outcome.missing, outcome.clarifications) == ("resolved", [], [])
     assert [item["id"] for item in outcome.user_definitions] == [5, 6]
-    assert "Cao nhất ≥ 35 °C." in model.prompts[0][1][1][1]
+    assert "Cao nhất ≥ 35 °C." in model.prompt("Understanding")
     assert semantic_layer.calls[0][2]["filters"][-1] == {"column": "nhiet_do_cao_nhat_c", "operator": ">=", "value": 35}
     assert outcome.result["filters"][-1]["source"] == "user_definition"
 
@@ -298,7 +309,9 @@ def test_an_empty_catalog_still_classifies_the_question_and_proposes_every_missi
     answers = _answers(undefined_concepts=("nắng nóng",), term_ids=(), metrics=(), rule_ids=())
     outcome, _, model = _run(answers, catalog=SemanticCatalog())
 
-    assert [schema for schema, _ in model.prompts] == ["Understanding", "MissingProposals", "final"]
+    assert [schema for schema, _ in model.prompts] == [
+        "QuestionTriage", "Understanding", "MissingProposals", "final",
+    ]
     assert outcome.missing == ["glossary", "metric", "expert_rule"]
     assert [draft["kind"] for draft in outcome.clarifications] == ["glossary", "expert_rule"]
     assert list(outcome.suggestions) == ["metric"]
@@ -310,7 +323,7 @@ def test_a_failing_step_reports_an_error_tool_end_and_stops():
 
     model = FakeModel(_answers())
     generator = pipeline.run_agent("Câu hỏi", [], model, failing_catalog)
-    events = [next(generator) for _ in range(2)]
+    events = [next(generator) for _ in range(4)]
 
     assert events[-1][0] == "tool_end" and events[-1][1]["status"] == "error"
     assert events[-1][1]["error"] == "Semantic Layer không phản hồi"
@@ -332,9 +345,12 @@ def test_the_understanding_prompt_carries_the_conversation():
     history = [{"role": "user", "content": "Nhiệt độ ở Huế?"}, {"role": "assistant", "content": "Đã xác định."}]
     _, events, model = _run(_answers(), history=history)
 
-    prompt = model.prompts[0][1][1][1]
+    prompt = model.prompt("Understanding")
     assert "user: Nhiệt độ ở Huế?" in prompt and "Câu hỏi mới nhất" in prompt
-    assert events[2][1]["arguments"]["history_turns"] == 1
+    understood = next(
+        data for name, data in events if name == "tool_start" and data["name"] == "understand_question"
+    )
+    assert understood["arguments"]["history_turns"] == 1
 
 
 def test_consumer_payloads_flatten_to_the_ids_the_agent_answers_with():
@@ -415,4 +431,4 @@ def test_a_user_definition_with_stored_conditions_is_queried_with_them():
     sent = semantic_layer.calls[0][2]["filters"]
     assert sent[0] == {"column": "nhiet_do_cao_nhat_c", "operator": ">=", "value": 35}
     assert [item["value"] for item in sent if item["column"] == "nhiet_do_cao_nhat_c"] == [35]
-    assert '"conditions"' in model.prompts[0][1][1][1]
+    assert '"conditions"' in model.prompt("Understanding")

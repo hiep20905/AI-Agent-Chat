@@ -9,6 +9,7 @@ import {
 import { QueryResultView } from './QueryResultView';
 
 const TOOL_LABELS: Record<string, string> = {
+  classify_question: 'Phân loại câu hỏi',
   load_semantic_catalog: 'Tải dữ liệu quản trị nghiệp vụ',
   understand_question: 'Hiểu câu hỏi, chọn thuật ngữ, metric, rule và lập truy vấn',
   query_metrics: 'Truy vấn số liệu',
@@ -141,7 +142,16 @@ function ToolActivity({ toolCalls, running }: { toolCalls: ToolCall[]; running: 
   );
 }
 
+/** Whether the classifier sent the question down a path with no query: small talk, a question about the data, … */
+function answeredWithoutQuery(turn: Turn): boolean {
+  const classified = turn.toolCalls.find(call => call.name === 'classify_question')?.result as
+    { triage?: string } | undefined;
+  return classified?.triage !== undefined && classified.triage !== 'answerable';
+}
+
 function OutcomeBadge({ turn, outcome }: { turn: Turn; outcome: NonNullable<Turn['outcome']> }) {
+  // The answer itself says why a question was declined; there is no business content to report on.
+  if (answeredWithoutQuery(turn)) return null;
   if (outcome.status === 'resolved') {
     return (
       <p className="ai-outcome is-resolved">

@@ -85,7 +85,7 @@ Cùng các lớp `common`, `core`, `modules` và cùng cấu trúc một module.
 
 | Module | Nghiệp vụ |
 | --- | --- |
-| `chat` | Trả lời một câu hỏi: pipeline, prompt, lập kế hoạch truy vấn, diễn giải công thức, `/chat/stream` |
+| `chat` | Trả lời một câu hỏi: phân loại câu hỏi, pipeline, prompt, lập kế hoạch truy vấn, diễn giải công thức, `/chat/stream` |
 | `sessions` | Cuộc trò chuyện của người dùng và trang `/ai-agent/` |
 | `questions` | Nhật ký câu hỏi và cách quản trị viên xử lý câu `needs_review` |
 | `definitions` | Cách hiểu của người dùng, điều kiện suy ra từ đó, và màn duyệt của quản trị viên |

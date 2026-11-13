@@ -13,6 +13,10 @@ class AgentQuestion(BaseModel):
     expert rule; otherwise it is `needs_review` and `missing` lists what was not found. A missing term or rule becomes
     a draft in `clarifications` for the user to confirm; a missing metric is proposed in `suggestions` for an
     administrator.
+
+    A question the classifier (`triage`) finds needs no query is answered without one and lacks nothing: a question
+    about the data or small talk is `resolved`, one out of the dashboard's domain, not supported or not understood is
+    `declined`, and a blocked one is `blocked`.
     """
 
     __table_args__ = ({"extend_existing": True},)
@@ -21,6 +25,8 @@ class AgentQuestion(BaseModel):
     user_id = Column(Integer, nullable=True, index=True)
     dashboard_id = Column(Integer, nullable=True)
     question = Column(Text, nullable=False)
+    # The labels of docs/specs/taxonomy-cau-hoi.md; NULL on questions logged before questions were classified.
+    triage = Column(JSON, nullable=True)
     rewritten_question = Column(Text, nullable=True)
     history_turns = Column(Integer, nullable=False, default=0)
     glossary_terms = Column(JSON, nullable=False, default=list)
@@ -30,7 +36,7 @@ class AgentQuestion(BaseModel):
     # NULL on questions logged before the agent told qualitative from quantitative questions.
     requires_expert_rule = Column(Boolean, nullable=True)
     suggestions = Column(JSON, nullable=True)
-    # resolved, needs_review, or failed when a step errored before the semantic layer could be consulted.
+    # resolved, needs_review, declined, blocked, or failed when a step errored before an answer.
     status = Column(String(20), nullable=False, index=True)
     answer = Column(Text, nullable=True)
     error = Column(Text, nullable=True)

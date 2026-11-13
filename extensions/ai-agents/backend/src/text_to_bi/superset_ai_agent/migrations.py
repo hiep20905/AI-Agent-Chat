@@ -30,6 +30,7 @@ ADDED_COLUMNS_DDL = (
     "ALTER TABLE text_to_bi_agent_question ADD COLUMN IF NOT EXISTS retry_of INTEGER",
     "ALTER TABLE text_to_bi_agent_question ADD COLUMN IF NOT EXISTS query_result JSON",
     "ALTER TABLE text_to_bi_agent_user_definition ADD COLUMN IF NOT EXISTS conditions JSON",
+    "ALTER TABLE text_to_bi_agent_question ADD COLUMN IF NOT EXISTS triage JSON",
 )
 
 

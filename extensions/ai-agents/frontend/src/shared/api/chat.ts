@@ -1,6 +1,7 @@
 import { getJson, sendJson } from './http';
 
-export type QuestionStatus = 'resolved' | 'needs_review' | 'failed';
+// `declined` and `blocked` questions were answered without a query (docs/specs/taxonomy-cau-hoi.md).
+export type QuestionStatus = 'resolved' | 'needs_review' | 'declined' | 'blocked' | 'failed';
 export type MissingKind = 'glossary' | 'metric' | 'expert_rule';
 
 export type ToolStartEvent = { id: string; name: string; arguments: Record<string, unknown> };

@@ -89,6 +89,7 @@ def log_question(
         session_id=session_id,
         dashboard_id=dashboard_id,
         question=question,
+        triage=outcome.triage,
         rewritten_question=outcome.rewritten_question,
         history_turns=history_turns,
         glossary_terms=outcome.glossary_terms,
