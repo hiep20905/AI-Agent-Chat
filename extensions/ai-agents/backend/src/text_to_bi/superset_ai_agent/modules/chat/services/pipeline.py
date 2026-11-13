@@ -41,6 +41,8 @@ PART_SKIPPED_MESSAGE = "Phần trước không có kết quả để dùng tiế
 EMPTY_RESULT_DETAIL = "Không có dòng nào khớp các bộ lọc."
 # How many of a column's stored values a look-up shows the model and the page.
 MAX_VALUES_SHOWN = 50
+# How many rows of the turn before a follow-up sees ("hôm đó" points at one of them).
+MAX_PREVIOUS_ROWS = 5
 
 Event = tuple[str, dict[str, Any]]
 # Runs one approved metric: (dataset_id, metric_id, {dimensions, filters}) -> the Semantic Layer's answer.
@@ -534,16 +536,60 @@ def _propose_dataset(
     return step + 1
 
 
+def _previous_query(result: dict[str, Any]) -> dict[str, Any] | None:
+    """What a follow-up may build on from a table answered before: the dataset, metrics, dimensions and filters it ran
+    (a rule's filters left out, since a rule is applied again by name), its compared period, scope and first rows."""
+    queries = [item for item in result.get("queries") or [] if item.get("period") is None]
+    if not queries:
+        return None
+    comparison = result.get("comparison")
+    return {
+        "dataset_id": queries[0]["dataset_id"],
+        "metric_ids": list(dict.fromkeys(item["metric_id"] for item in queries)),
+        "metrics": [metric["label"] for metric in result.get("metrics", [])],
+        "dimensions": [dimension["name"] for dimension in result.get("dimensions", [])],
+        "filters": [
+            {key: item[key] for key in ("column", "operator", "value", "source")}
+            for item in result.get("filters", []) if item.get("source") != "expert_rule"
+        ],
+        "comparison": {key: comparison[key] for key in ("label", "start", "end")} if comparison else None,
+        "scope": result.get("scope"),
+        "rows": result.get("rows", [])[:MAX_PREVIOUS_ROWS],
+    }
+
+
+def previous_queries(query_result: dict[str, Any] | None, part_results: list[dict[str, Any]] | None) -> list[dict]:
+    """The queries a turn ran, as a follow-up reads them: its one table, or one per answered sub-question."""
+    results = [query_result] if query_result else [part["result"] for part in part_results or [] if part.get("result")]
+    return [summary for summary in map(_previous_query, results) if summary]
+
+
+def _kept_period(query: QueryPlan | None, previous: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The time filters of the turn before, when a follow-up plan on the same dataset names no period of its own.
+
+    "Còn Hải Phòng thì sao?" after "nhiệt độ ở Hà Nội tuần này" means this week too; left to itself the plan would fall
+    back to the metric's default window, and the two answers would not be about the same days.
+    """
+    if query is None or any(item.source == "time" for item in query.filters):
+        return []
+    earlier = next((item for item in previous if item["dataset_id"] == query.dataset_id), None)
+    return [item for item in (earlier or {}).get("filters", []) if item["source"] == "time"]
+
+
 def _conversation(history: list[dict[str, str]]) -> str:
     return "\n".join(f"{item['role']}: {item['content']}" for item in history) or "(chưa có)"
 
 
-def _triage_input(question: str, history: list[dict[str, str]], dashboard: str | None) -> str:
-    return "\n\n".join((
-        f"Dashboard: {dashboard or '(không rõ tên)'}",
-        f"Lịch sử hội thoại:\n{_conversation(history)}",
-        f"Câu hỏi mới nhất: {question}",
-    ))
+def _triage_input(
+    question: str, history: list[dict[str, str]], dashboard: str | None, previous: Sequence[dict[str, Any]] = (),
+) -> str:
+    blocks = [f"Dashboard: {dashboard or '(không rõ tên)'}", f"Lịch sử hội thoại:\n{_conversation(history)}"]
+    if previous:
+        # What the last turn asked about, so a follow-up is rewritten with its exact scope and figures.
+        blocks.append(_data_block("Phạm vi lượt trước", [
+            {key: item[key] for key in ("scope", "metrics", "dimensions")} for item in previous
+        ]))
+    return "\n\n".join([*blocks, f"Câu hỏi mới nhất: {question}"])
 
 
 def _streamed_answer(model: Any, messages: list[tuple[str, str]], outcome: AgentOutcome) -> Iterator[Event]:
@@ -600,11 +646,14 @@ def _answer_question(
     today: date,
     builder: MetricBuilder | None,
     outcome: AgentOutcome,
+    previous: Sequence[dict[str, Any]] = (),
 ):
     """Understand one single-intent question against the catalog, then answer it with approved metrics or say what is
     missing. Its steps are numbered from `first_step`; returns the context the final answer is written from.
 
-    With a `builder`, a question that only lacks a metric climbs to the data model and builds one.
+    With a `builder`, a question that only lacks a metric climbs to the data model and builds one. `previous` is what
+    the turn before queried, given for a follow-up: the model builds on its filters, and a plan on the same dataset
+    that names no period keeps that turn's period.
     """
     definitions_by_id = {item["id"]: item for item in user_definitions}
     user_rules_by_id = {item_id: item for item_id, item in definitions_by_id.items() if item["kind"] == "expert_rule"}
@@ -621,6 +670,7 @@ def _answer_question(
         _data_block("Expert rule đã duyệt", _described(catalog.expert_rules, RULE_FIELDS)),
         _data_block("Cách hiểu người dùng đã xác nhận", _described(list(user_definitions), USER_DEFINITION_FIELDS)),
         _data_block("Dataset: cột và giá trị có nhãn", catalog.datasets),
+        *([_data_block("Truy vấn lượt trước", list(previous))] if previous else []),
     ))
     understanding = yield from _tool_call(
         first_step, "understand_question", {"question": question, "history_turns": len(history) // 2},
@@ -629,6 +679,9 @@ def _answer_question(
     )
     outcome.rewritten_question = understanding.standalone_question.strip() or question
     asked = outcome.rewritten_question
+    kept_period = _kept_period(understanding.query, previous)
+    if kept_period:
+        understanding.query.filters = [*understanding.query.filters, *(QueryFilter(**item) for item in kept_period)]
     chosen_terms = [terms_by_id[term_id] for term_id in _known(understanding.term_ids, terms_by_id)]
     outcome.glossary_terms = [{"id": term["id"], "name": term["name"]} for term in chosen_terms]
     outcome.undefined_concepts = [concept.strip() for concept in understanding.undefined_concepts if concept.strip()]
@@ -706,6 +759,9 @@ def _answer_question(
         step = yield from _query_with_repair(
             step, plan, asked, catalog, rules, [rule["id"] for rule in chosen_rules], today, model, run_metric, outcome,
         )
+        if kept_period and outcome.result is not None:
+            period = " – ".join(str(item["value"]) for item in kept_period)
+            outcome.result["notes"] = [*outcome.result["notes"], f"Giữ khoảng thời gian của câu hỏi trước: {period}."]
 
     answered_metrics = chosen_metrics or ([built_metric] if built_metric else [])
     context = {
@@ -1080,6 +1136,7 @@ def run_agent(
     today: date | None = None,
     builder: MetricBuilder | None = None,
     dashboard: str | None = None,
+    previous: Sequence[dict[str, Any]] = (),
 ) -> Iterator[Event]:
     """Run one question asked on the dashboard titled `dashboard`; `user_definitions` are what the user confirmed there.
 
@@ -1090,7 +1147,7 @@ def run_agent(
     today = today or date.today()
     outcome = AgentOutcome()
 
-    triage_input = _triage_input(question, history, dashboard)
+    triage_input = _triage_input(question, history, dashboard, previous)
     triage = yield from _tool_call(
         1, "classify_question", {"question": question, "history_turns": len(history) // 2},
         lambda: checked_triage(_ask(model, QuestionTriage, prompts.CLASSIFY_QUESTION, triage_input)),
@@ -1112,8 +1169,11 @@ def run_agent(
         context = {"today": iso_datetime(today), "question": question, "parts": parts}
     else:
         understood_question = triage.sub_questions[0].text if triage.sub_questions else question
+        # A follow-up builds on what the turn before queried; a new question starts afresh.
+        earlier = previous if triage.follow_up != "new" else ()
         answered = yield from _answer_question(
             3, understood_question, history, catalog, model, user_definitions, run_metric, today, builder, outcome,
+            earlier,
         )
         context = {"today": iso_datetime(today), **answered}
     if triage.set_aside:

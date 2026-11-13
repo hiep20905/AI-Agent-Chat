@@ -55,7 +55,15 @@ about, runs the approved metrics through the Semantic Layer, answers with the
 numbers, and logs the question so administrators can fill the gaps:
 
 1. The browser sends the question and its conversation; the server reads the
-   conversation's last three answered turns from the log.
+   conversation's last three answered turns from the log, and what the last
+   of them queried (`last_queries`: its `query_result`, or each answered
+   part of `part_results`, kept as dataset, metrics, dimensions, filters
+   without a rule's, compared period, scope and first five rows). The
+   classifier sees that turn's scope; a follow-up (`follow_up` other than
+   `new`) answered as one question gives the whole query to
+   `understand_question`, which keeps its filters and values unless the
+   question changes them, and a plan on the same dataset with no time filter
+   gets that turn's time filters, noted in the result.
 2. `classify_question` is one model call that sees only the question, the
    conversation and the dashboard's title, never the catalog, and labels the
    question on the four axes of `docs/specs/taxonomy-cau-hoi.md`

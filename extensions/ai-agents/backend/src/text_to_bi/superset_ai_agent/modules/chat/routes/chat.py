@@ -21,7 +21,14 @@ from ...semantic_layer.services.data_model import cached_data_model_sources, pro
 from ...semantic_layer.services.metrics import create_agent_metric, run_metric_query
 from ...sessions.services.sessions import require_own_session, start_session, touch_session
 from ...superset.services.dashboards import dashboard_titles, require_dashboard_access
-from ..services.conversation import asked_question, log_question, parse_chat_request, record_tool_call, session_history
+from ..services.conversation import (
+    asked_question,
+    last_queries,
+    log_question,
+    parse_chat_request,
+    record_tool_call,
+    session_history,
+)
 from ..services.pipeline import AgentOutcome, MetricBuilder, run_agent
 
 logger = logging.getLogger(__name__)
@@ -68,6 +75,8 @@ class TextToBIAgentAPI(RestApi):
         session_payload = {"id": chat_session.id, "title": chat_session.title, "dashboard_id": dashboard_id}
         session_id = chat_session.id
         history = session_history(session_id, retry_of)
+        # What the last answered turn queried, so a follow-up keeps its filters and period.
+        previous = last_queries(session_id, retry_of)
         user_definitions = definitions_for_agent(user_id, dashboard_id)
         # The dashboard's title tells the question classifier what the data is about.
         dashboard_title = dashboard_titles({dashboard_id}).get(dashboard_id)
@@ -96,6 +105,7 @@ class TextToBIAgentAPI(RestApi):
                         propose_dataset=lambda draft: propose_agent_dataset(draft, cookie_header, csrf_token),
                     ),
                     dashboard=dashboard_title,
+                    previous=previous,
                 )
                 while True:
                     try:

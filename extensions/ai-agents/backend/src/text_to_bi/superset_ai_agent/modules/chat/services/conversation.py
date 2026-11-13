@@ -10,7 +10,7 @@ from ..exceptions import (
     RetriedQuestionError,
     RetriedQuestionNotFoundError,
 )
-from .pipeline import MAX_HISTORY_TURNS, AgentOutcome, recent_history
+from .pipeline import MAX_HISTORY_TURNS, AgentOutcome, previous_queries, recent_history
 
 MAX_QUESTION_LENGTH = 2000
 
@@ -58,6 +58,18 @@ def session_history(session_id: int, excluded_question_id: int | None) -> list[d
         for question, answer in reversed(answered)
         for message in ({"role": "user", "content": question}, {"role": "assistant", "content": answer})
     ])
+
+
+def last_queries(session_id: int, excluded_question_id: int | None) -> list[dict[str, Any]]:
+    """What the conversation's last answered turn queried, so a follow-up question keeps its filters and period.
+
+    A question answered again after the user confirmed definitions leaves out its first answer, as the history does.
+    """
+    answered = question_repository().last_answered_results(session_id, excluded_question_id)
+    if answered is None:
+        return []
+    query_result, part_results = answered
+    return previous_queries(query_result, part_results)
 
 
 def record_tool_call(tool_calls: list[dict[str, Any]], name: str, data: dict[str, Any]) -> None:

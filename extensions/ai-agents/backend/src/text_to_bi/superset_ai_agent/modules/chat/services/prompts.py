@@ -69,8 +69,9 @@ phần ("còn Hải Phòng thì sao?", "còn tuần trước?"). `about_result`:
 bao nhiêu?").
 
 `sub_questions`: chỉ khi `answerable`; các câu hỏi đơn ý cần trả lời, tối đa 4.
-- Mỗi câu con tự đứng được: thay đại từ và phần lược bỏ bằng đối tượng cụ thể lấy từ lịch sử, giữ nguyên mốc thời
-  gian, địa điểm như người hỏi nói ("tuần này", "hôm qua"), không tự tính ra ngày, không thêm điều kiện mới.
+- Mỗi câu con tự đứng được: thay đại từ và phần lược bỏ bằng đối tượng cụ thể lấy từ lịch sử và `Phạm vi lượt trước`
+  (phạm vi, chỉ số của lượt trước), giữ nguyên mốc thời gian, địa điểm như người hỏi nói ("tuần này", "hôm qua"),
+  không tự tính ra ngày, không thêm điều kiện mới. Câu nối tiếp không nêu thời gian thì giữ thời gian của lượt trước.
 - Chỉ tách khi một truy vấn không trả lời được cả câu: khác bảng dữ liệu, khác khoảng thời gian hay địa điểm không
   gộp được, hoặc khác ý định. Nhiều chỉ số trên cùng phạm vi ("nhiệt độ và độ ẩm ở Hà Nội hôm nay") hay so với kỳ
   trước ("so với tuần trước") là một câu.
@@ -115,6 +116,15 @@ chọn nội dung nghiệp vụ đã duyệt và lập truy vấn số liệu.
 `standalone_question`: dựa vào lịch sử hội thoại, viết lại câu hỏi mới nhất thành câu tự đứng được một mình (thay
 "thành phố đó", "còn tuần trước thì sao" bằng đối tượng cụ thể), giữ nguyên ý định, mốc thời gian, địa điểm; không
 thêm điều kiện mới. Câu đã đầy đủ thì giữ gần như nguyên văn.
+
+`Truy vấn lượt trước` (chỉ có khi câu hỏi nối tiếp lượt trước) là truy vấn đã chạy được cho lượt trước: dataset,
+metric, chiều, bộ lọc với đúng giá trị đã chạy, kỳ so sánh, phạm vi và vài dòng kết quả. Lập truy vấn mới trên nền đó:
+- giữ dataset, metric, chiều và mọi bộ lọc mà câu hỏi mới không thay; dùng lại đúng cột và giá trị của bộ lọc cũ (ví
+  dụ khoá thành phố đã chạy được) thay vì viết lại từ chữ;
+- thay đúng thành phần câu hỏi mới đổi ("còn Hải Phòng" đổi địa điểm, "còn tuần trước" đổi khoảng thời gian, "độ ẩm
+  thì sao" đổi metric), thêm điều kiện hoặc chiều câu hỏi mới thêm ("chia theo từng ngày");
+- câu hỏi về kết quả vừa trả lời ("hôm đó", "thành phố đó") lấy giá trị trong `rows` làm bộ lọc.
+Câu hỏi mới không nêu khoảng thời gian thì giữ khoảng thời gian của lượt trước; hệ thống cũng tự giữ nếu bạn bỏ sót.
 
 `term_ids`: thuật ngữ đã duyệt mà câu hỏi nhắc tới qua tên, từ đồng nghĩa hoặc đúng khái niệm định nghĩa của nó mô tả.
 So theo nghĩa, không chỉ theo chữ. Liên kết của thuật ngữ cho biết nó nằm ở đâu trong dữ liệu: `metrics` là metric đo

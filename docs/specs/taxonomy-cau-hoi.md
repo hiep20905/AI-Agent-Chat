@@ -156,8 +156,13 @@ Kế thừa từ lượt trước:
 | Địa điểm, bộ lọc | Không | Giữ, thêm điều kiện mới | Giữ, trừ khi bị thay | Lấy từ kết quả lượt trước |
 | Chiều phân tích | Không | Giữ, thêm chiều mới | Giữ | Không |
 
-Ở bước này kế thừa được làm bằng cách viết lại câu con thành câu tự đứng được. Việc truyền kế hoạch truy vấn của lượt
-trước dưới dạng có cấu trúc thuộc việc "Dùng ngữ cảnh trước để hiểu câu hỏi nối tiếp" và dùng lại nhãn của trục này.
+Kế thừa làm theo hai lớp. Bước phân loại viết lại câu con thành câu tự đứng được, có thêm "Phạm vi lượt trước" (phạm
+vi, chỉ số, chiều của lượt trước). Với câu nối tiếp (`follow_up` khác `new`), bước hiểu câu hỏi nhận thêm "Truy vấn
+lượt trước": truy vấn lượt trước đã chạy được (dataset, metric, chiều, bộ lọc với đúng giá trị đã chạy, trừ bộ lọc
+của expert rule; kỳ so sánh, phạm vi, 5 dòng đầu), lấy từ `query_result` hoặc `part_results` của lượt trả lời gần
+nhất. Kế hoạch trên cùng dataset mà không có bộ lọc thời gian thì code tự giữ bộ lọc thời gian của lượt trước và ghi
+chú "Giữ khoảng thời gian của câu hỏi trước", để hai câu trả lời luôn nói về cùng các ngày. Câu mới (`new`) không
+nhận gì từ lượt trước.
 
 ## 8. Đầu ra của bước phân loại
 

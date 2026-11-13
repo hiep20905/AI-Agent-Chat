@@ -28,6 +28,19 @@ class AgentQuestionRepository(BaseRepository[AgentQuestion]):
             .all()
         )
 
+    def last_answered_results(
+        self, session_id: int, excluded_question_id: int | None,
+    ) -> tuple[dict | None, list | None] | None:
+        """The table the conversation's last answered turn ran (`query_result`), or one per sub-question
+        (`part_results`); None when no turn was answered yet."""
+        return (
+            self.session.query(AgentQuestion.query_result, AgentQuestion.part_results)
+            .filter(AgentQuestion.session_id == session_id, AgentQuestion.id != (excluded_question_id or 0))
+            .filter(AgentQuestion.answer.isnot(None), AgentQuestion.error.is_(None))
+            .order_by(AgentQuestion.id.desc())
+            .first()
+        )
+
     def detach_session(self, session_id: int) -> None:
         """Keep a deleted conversation's questions in the log with no session."""
         self.query().filter(AgentQuestion.session_id == session_id).update({AgentQuestion.session_id: None})
