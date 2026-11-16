@@ -12,6 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from ....common.utils.type_formatter import iso_datetime
+from ....core.structured_output import structured_answer
 from ...schema_link.exceptions import GoalError, NoJoinPathError
 from ...schema_link.services.analysis import link_question
 from ...schema_link.services.answering import base_table_result, dataset_proposal
@@ -25,6 +26,7 @@ from ..exceptions import QueryPlanError
 from . import prompts
 from .formula import answers_anything, doubtful_result, told_formula
 from .intents import shaped_plan
+from .plausibility import implausible_values
 from .query import combined_result, plan_query, result_for_answer
 from .repair import (
     MAX_QUERY_ATTEMPTS,
@@ -300,7 +302,7 @@ def _tool_call(
 
 
 def _ask(model: Any, schema: type[BaseModel], system_prompt: str, user_content: str) -> Any:
-    return model.with_structured_output(schema).invoke([("system", system_prompt), ("human", user_content)])
+    return structured_answer(model, schema, [("system", system_prompt), ("human", user_content)])
 
 
 MAX_OPTIONS = 4
@@ -1003,6 +1005,12 @@ def _answer_question(
             period = " – ".join(str(item["value"]) for item in kept_period)
             outcome.result["notes"] = [*outcome.result["notes"], f"Giữ khoảng thời gian của câu hỏi trước: {period}."]
 
+    if outcome.result is not None:
+        # A figure no data of its unit can be is shown with a warning, never stated as fact.
+        suspicious = implausible_values(outcome.result)
+        if suspicious:
+            outcome.result["suspicious"] = suspicious
+            outcome.result["notes"] = [*outcome.result["notes"], *(f"Cần kiểm tra: {line}" for line in suspicious)]
     answered_metrics = chosen_metrics or ([built_metric] if built_metric else [])
     context = {
         "question": asked,

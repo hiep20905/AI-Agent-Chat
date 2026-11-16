@@ -37,10 +37,10 @@ có dòng nào", kể cả khi rỗng chỉ vì viết sai một giá trị. Tr�
 | `not_allowed` | Metric chưa duyệt hoặc hết hiệu lực, người hỏi không có quyền | Semantic Layer trả 401, 403, 404 | Không thử lại; nói chỉ số chưa được duyệt hoặc chưa có quyền | Có |
 | `out_of_range` | Khoảng thời gian hỏi nằm ngoài dữ liệu | `coverage.status` là `none` | Không thử lại; nêu khoảng dữ liệu có (đã có từ trước) | Có |
 | `no_match` | Đúng là không có dòng nào thoả (ngưỡng, khoảng thời gian không có sự kiện) | 0 dòng, không có bộ lọc chữ | Không thử lại; nói không có trường hợp thoả | Có |
-| `suspicious_value` | Kết quả có nhưng bất thường: toàn 0 hoặc rỗng, giá trị ngoài miền hợp lý | Hiện chỉ có với metric tạm tính (`doubt`) | Cảnh báo, không khẳng định | Một phần |
+| `suspicious_value` | Kết quả có nhưng bất thường: toàn 0 hoặc rỗng, giá trị ngoài miền hợp lý | Metric tạm tính: toàn 0 hoặc rỗng (`doubt`). Mọi kết quả: giá trị ngoài khoảng hợp lý theo đơn vị (% ngoài 0–100, °C ngoài −90…60, hPa ngoài 800–1100, mm, km/h, ngày âm) trong `chat/services/plausibility.py` | Vẫn hiện số, thêm ghi chú "Cần kiểm tra" và `result.suspicious`; câu trả lời không kết luận dựa trên số đó | Có |
 | `wrong_meaning` | Chọn sai metric, sai chiều, sai khoảng thời gian dù truy vấn chạy được | Không nhận biết lúc chạy; chỉ thấy qua benchmark | Đo bằng benchmark (việc 9–11) | Chưa |
 | `model_limit` | Nhà cung cấp mô hình từ chối vì hạn mức: hết credit hoặc quá nhiều yêu cầu | Lỗi 402 hoặc 429 từ OpenRouter (gặp khi chạy benchmark ngày 16/11/2026) | Không thử lại; báo người hỏi dịch vụ mô hình đang hết hạn mức hoặc quá tải, thử lại sau hoặc báo quản trị viên | Có |
-| `bad_model_output` | Model trả đầu ra hỏng | Lỗi parse đầu ra có cấu trúc | Hiện báo lỗi bước đó; nên thử lại một lần | Chưa |
+| `bad_model_output` | Model trả đầu ra hỏng | Lỗi parse đầu ra có cấu trúc, hoặc không có đầu ra | `core/structured_output.py`: hỏi lại một lần (mọi bước có đầu ra có cấu trúc); lần hai vẫn hỏng thì báo lỗi bước đó. Lỗi có mã trạng thái của nhà cung cấp không hỏi lại | Có |
 
 Bước `repair_query` lỗi (model không phản hồi) thì dừng thử và giải thích lỗi đang có. Bước `explore_values` lỗi thì
 model vẫn được nhờ sửa, chỉ là không có danh sách giá trị.

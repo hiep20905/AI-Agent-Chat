@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from ....common.utils.type_formatter import iso_datetime
+from ....core.structured_output import structured_answer
 
 AGGREGATION = Literal["SUM", "AVG", "MIN", "MAX", "COUNT", "COUNT_DISTINCT"]
 OPERATOR = Literal["==", "!=", "<", "<=", ">", ">=", "IN", "NOT IN"]
@@ -93,8 +94,8 @@ def draft_goal(
 ) -> GoalDraft:
     """One model call that turns the question into a goal, choosing among the ranked candidates only; `feedback` says
     why the goal drafted before could not be used, when this is another try."""
-    return model.with_structured_output(GoalDraft).invoke(
-        [("system", LINK_GOAL), ("human", draft_input(question, candidates, today, feedback))]
+    return structured_answer(
+        model, GoalDraft, [("system", LINK_GOAL), ("human", draft_input(question, candidates, today, feedback))],
     )
 
 

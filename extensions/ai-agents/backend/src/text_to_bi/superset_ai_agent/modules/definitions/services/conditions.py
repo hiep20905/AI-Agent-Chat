@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from ....core.chat_models import get_chat_model
 from ....core.exceptions import ChatModelNotConfiguredError
+from ....core.structured_output import structured_answer
 from ...chat.exceptions import QueryPlanError
 from ...chat.services.query import checked_conditions
 from ...semantic_layer.services.catalog import SemanticCatalog, cached_semantic_catalog
@@ -48,8 +49,8 @@ def structured_conditions(definition: dict[str, Any], catalog: SemanticCatalog, 
     asked = {key: definition.get(key) for key in ("name", "concept", "definition")}
     content = f"Cách hiểu:\n```json\n{json.dumps(asked, ensure_ascii=False)}\n```\n\n{_catalog_block(catalog)}"
     try:
-        answer = model.with_structured_output(DefinitionConditions).invoke(
-            [("system", prompts.STRUCTURE_DEFINITION), ("human", content)],
+        answer = structured_answer(
+            model, DefinitionConditions, [("system", prompts.STRUCTURE_DEFINITION), ("human", content)],
         )
     except Exception:
         logger.exception("Could not structure the definition %s", definition.get("name"))

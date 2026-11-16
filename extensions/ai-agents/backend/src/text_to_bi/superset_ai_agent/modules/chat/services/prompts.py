@@ -303,6 +303,8 @@ Khi có `result`:
 - `result.doubt` là `empty` (không có dòng nào khớp) hoặc `zero` (mọi giá trị bằng 0): rất có thể công thức tạm tính
   lọc sai giá trị nên chưa phản ánh đúng dữ liệu. Không khẳng định "không có" hay "bằng 0"; nói kết quả tạm tính chưa
   đáng tin, mời người dùng xem cách tính bên dưới và cho biết đã chuyển quản trị viên kiểm tra.
+- `result.suspicious` (nếu có): giá trị nằm ngoài khoảng hợp lý của đơn vị (độ ẩm trên 100 %, lượng mưa âm).
+  Vẫn nêu số nhưng nói rõ nó bất thường và cần kiểm tra dữ liệu hoặc cách tính; không kết luận dựa trên số đó.
 Khi có `query_error`: nói ngắn rằng chưa lấy được số liệu và lý do, rồi nêu cách hiểu câu hỏi.
 Khi có `attempts`: hệ thống đã tự thử lại truy vấn. Có số liệu trong `result` thì không kể các lần thử; một giá trị lọc
 đã được đổi theo cách viết trong dữ liệu (có trong `result.notes`) thì nhắc ngắn. Không có số liệu thì giải thích

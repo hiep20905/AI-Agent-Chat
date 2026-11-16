@@ -303,3 +303,36 @@ def test_a_count_of_zero_over_a_name_the_data_holds_as_written_is_the_answer():
     assert _steps(events)[3:] == ["query_metrics", "explore_values"]
     assert outcome.result["rows"][0]["nhiet_do_cao_nhat"] == 0 and outcome.attempts == []
     assert "repair_query" not in _steps(events)
+
+
+def test_a_figure_outside_what_its_unit_allows_is_answered_with_a_warning():
+    from text_to_bi.superset_ai_agent.modules.chat.services.plausibility import implausible_values
+
+    result = {
+        "metrics": [{"name": "do_am", "label": "Độ ẩm trung bình", "unit": "%"},
+                    {"name": "mua", "label": "Tổng lượng mưa", "unit": "mm"},
+                    {"name": "nhiet", "label": "Nhiệt độ", "unit": "°C"},
+                    {"name": "dem", "label": "Số lần", "unit": None}],
+        "rows": [{"do_am": 81.4, "mua": 3.2, "nhiet": 27.0, "dem": -5},
+                 {"do_am": 120.0, "mua": -1.5, "nhiet": 25.0, "dem": 3}],
+    }
+
+    assert implausible_values(result) == [
+        "Độ ẩm trung bình có giá trị 120 %, ngoài khoảng hợp lý (từ 0 đến 100 %).",
+        "Tổng lượng mưa có giá trị -1.5 mm, ngoài khoảng hợp lý (từ 0 mm trở lên).",
+    ]
+
+
+def test_a_suspicious_figure_reaches_the_result_notes_and_the_answer():
+    class WetSemanticLayer(CitiesSemanticLayer):
+        def __call__(self, dataset_id, metric_id, query):
+            self.calls.append(query)
+            return {"rows": [{"nhiet_do_cao_nhat": "75"}]}
+
+    outcome, _, model, _ = _run(_in_city("Hue"), semantic_layer=WetSemanticLayer())
+
+    assert outcome.result["suspicious"] == [
+        "Nhiệt độ cao nhất có giá trị 75 °C, ngoài khoảng hợp lý (từ -90 đến 60 °C).",
+    ]
+    assert outcome.result["notes"][-1].startswith("Cần kiểm tra: Nhiệt độ cao nhất")
+    assert _final_context(model)["result"]["suspicious"]
