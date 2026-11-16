@@ -9,6 +9,13 @@ class CsrfTokenError(NotAuthorizedError):
     message = "CSRF token không hợp lệ."
 
 
+class ModelLimitError(ServiceUnavailableError):
+    message = (
+        "Dịch vụ mô hình AI đang hết hạn mức hoặc quá tải nên chưa trả lời được. Hãy thử lại sau ít phút; nếu vẫn lỗi, "
+        "báo quản trị viên kiểm tra hạn mức của khoá API."
+    )
+
+
 class MalformedModelOutputError(ServiceUnavailableError):
     message = "Mô hình AI trả lời sai định dạng hai lần liền; hãy thử hỏi lại."
 

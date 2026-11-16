@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import BaseModel
 
-from text_to_bi.superset_ai_agent.core.exceptions import MalformedModelOutputError
+from text_to_bi.superset_ai_agent.core.exceptions import MalformedModelOutputError, ModelLimitError
 from text_to_bi.superset_ai_agent.core.structured_output import structured_answer
 
 
@@ -50,9 +50,21 @@ def test_no_answer_twice_is_reported_as_malformed_output():
         structured_answer(ScriptedModel(None, None), Answer, [("human", "?")])
 
 
-def test_a_refusal_from_the_provider_is_not_asked_again():
+class BadKey(Exception):
+    status_code = 401
+
+
+def test_running_out_of_credit_is_told_as_the_providers_limit_and_not_asked_again():
     model = ScriptedModel(ProviderRefusal("out of credit"), Answer(value=3))
 
-    with pytest.raises(ProviderRefusal):
+    with pytest.raises(ModelLimitError, match="hạn mức"):
+        structured_answer(model, Answer, [("human", "?")])
+    assert model.calls == 1
+
+
+def test_another_refusal_from_the_provider_is_raised_as_it_is():
+    model = ScriptedModel(BadKey("invalid key"), Answer(value=3))
+
+    with pytest.raises(BadKey):
         structured_answer(model, Answer, [("human", "?")])
     assert model.calls == 1

@@ -14,7 +14,9 @@ from ....common.utils.type_formatter import sse_event
 from ....core.chat_models import get_chat_model
 from ....core.config import BUSINESS_TIMEZONE
 from ....core.database import handle_errors, rollback_on_error
+from ....core.exceptions import ModelLimitError
 from ....core.security import csrf_protected, is_admin
+from ....core.structured_output import MODEL_LIMIT_STATUSES
 from ....migrations import ensure_agent_tables
 from ...definitions.services.definitions import definitions_for_agent
 from ...semantic_layer.services.catalog import cached_semantic_catalog
@@ -41,12 +43,6 @@ from ..services.pipeline import AgentOutcome, MetricBuilder, classify_question, 
 
 logger = logging.getLogger(__name__)
 FAILED_ANSWER_MESSAGE = "AI Agent không hoàn tất được câu trả lời."
-# The model provider refused for its own limits: out of credit (402) or too many requests (429).
-MODEL_LIMIT_STATUSES = (402, 429)
-MODEL_LIMIT_MESSAGE = (
-    "Dịch vụ mô hình AI đang hết hạn mức hoặc quá tải nên chưa trả lời được. Hãy thử lại sau ít phút; nếu vẫn lỗi, báo "
-    "quản trị viên kiểm tra hạn mức của khoá API."
-)
 
 
 def _data_table_labels(user_id: int, cookie_header: str) -> list[str]:
@@ -178,8 +174,9 @@ class TextToBIAgentAPI(RestApi):
             except Exception as unexpected:
                 logger.exception("AI Agent stream failed")
                 error = str(unexpected) or type(unexpected).__name__
+                # The streamed final answer calls the model outside structured_answer, so its limits are told here.
                 limited = getattr(unexpected, "status_code", None) in MODEL_LIMIT_STATUSES
-                yield sse_event("error", {"message": MODEL_LIMIT_MESSAGE if limited else FAILED_ANSWER_MESSAGE})
+                yield sse_event("error", {"message": ModelLimitError.message if limited else FAILED_ANSWER_MESSAGE})
             # The log is written after the answer streamed; a failed write is logged and never breaks the answer.
             try:
                 question_id = log_question(

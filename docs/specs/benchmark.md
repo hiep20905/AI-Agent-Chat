@@ -103,6 +103,17 @@ Sửa:
 | B25, B27, B28, B31, B32, B33 | OpenRouter trả **402**: tài khoản không đủ credit cho các yêu cầu đang chạy song song | Không phải lỗi của agent. Thêm loại lỗi `model_limit` (`docs/specs/xu-ly-loi-truy-van.md`): lỗi 402 hoặc 429 từ nhà cung cấp mô hình được báo rõ cho người hỏi thay vì "không hoàn tất được câu trả lời". Chạy lại 6 câu với `--workers 1`: 6/6 |
 | B19 "Nhiệt độ cao nhất ở Hà Nội hôm qua và độ ẩm…" | Câu con đầu bị gán `ranking` vì "cao nhất" nằm trong tên chỉ số; số liệu vẫn đúng | Prompt phân loại: "cao nhất", "thấp nhất" là một phần tên chỉ số thì là `value`, `ranking` chỉ khi xếp các nhóm. Chạy lại B19: đạt |
 
+### Đo riêng bước phân loại (`--taxonomy`, 16/11/2026)
+
+27/53 câu có kết quả; 26 câu còn lại gặp lỗi 402 vì tài khoản OpenRouter hết credit giữa chừng, nên không tính. Trên 27
+câu đo được: đúng nhãn Trục 1 27/27, đúng cách tách câu và số câu con 26/27, đúng ý định 26/27, đúng quan hệ lượt trước
+27/27. Câu sai duy nhất (26 "Tìm vùng có tổng lượng mưa thấp nhất tháng này rồi so sánh với tháng trước") được gộp thành
+một câu `comparison` thay vì tách `ranking` rồi `comparison`. Tám câu `blocked` chưa đo được; cần chạy lại sau khi nạp
+credit.
+
+Lần chạy này lộ hai lỗi đã sửa: `/chat/classify` trả 500 "Fatal error" khi hết credit (nay là 503 với thông báo hạn
+mức, `ModelLimitError`), và script tính câu lỗi máy chủ là sai nhãn (nay để riêng, ghi số câu lỗi trong báo cáo).
+
 ## 6. Giới hạn và việc tiếp theo
 
 - Bộ câu còn nhỏ (33 câu) và do người viết code soạn; cần chuyên gia duyệt và bổ sung câu thật từ log ("Xử lý câu

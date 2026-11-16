@@ -379,9 +379,16 @@ def run_taxonomy(workers: int) -> None:
     with ThreadPoolExecutor(max_workers=workers) as pool:
         got = list(pool.map(lambda item: _classified(_login(), item, dashboard), sample))
     rows = [_scored_labels(item, labels) for item, labels in zip(sample, got)]
+    # A question the server could not classify (out of model credit, a crash) says nothing about the classifier.
+    failed = [row for row in rows if row["error"]]
+    rows = [row for row in rows if not row["error"]]
 
-    lines = [f"# Phân loại câu hỏi: {len(sample)} câu mẫu", "", "| Chỉ tiêu | Đo được | Ngưỡng | Đạt |",
-             "| --- | --- | --- | --- |"]
+    lines = [f"# Phân loại câu hỏi: {len(rows)}/{len(sample)} câu mẫu đo được", ""]
+    if failed:
+        lines += [f"{len(failed)} câu lỗi phía máy chủ, không tính vào chỉ tiêu: "
+                  + ", ".join(str(row["id"]) for row in failed) + f". Lỗi đầu: {failed[0]['error'][:200]}", ""]
+        print(f"WARN {len(failed)} questions failed on the server and are left out: {failed[0]['error'][:120]}")
+    lines += ["| Chỉ tiêu | Đo được | Ngưỡng | Đạt |", "| --- | --- | --- | --- |"]
     for name, (value, count) in _taxonomy_measures(rows).items():
         bound, kind = TAXONOMY_THRESHOLDS[name]
         passed = value >= bound if kind == "min" else value <= bound
@@ -391,12 +398,12 @@ def run_taxonomy(workers: int) -> None:
     lines += ["", "| Câu | Mong đợi | Nhận | Sai ở |", "| --- | --- | --- | --- |"]
     for row in rows:
         wrong = [name for name in ("triage", "execution", "intents", "follow_up") if row[name] is False]
-        if wrong or row["error"]:
-            detail = row["error"] or f"{', '.join(wrong)}; ý định {row['got_intents']} / {row['expected_intents']}"
+        if wrong:
+            detail = f"{', '.join(wrong)}; ý định {row['got_intents']} / {row['expected_intents']}"
             lines.append(f"| {row['id']} {row['question']} | {row['expected']} | {row['got']} | {detail} |")
     run_dir = BENCHMARK_DIR / "runs" / (datetime.now(BUSINESS_TIMEZONE).strftime("%Y%m%d-%H%M%S") + "-taxonomy")
     run_dir.mkdir(parents=True)
-    (run_dir / "taxonomy.json").write_text(json.dumps(rows, ensure_ascii=False, indent=1), encoding="utf-8")
+    (run_dir / "taxonomy.json").write_text(json.dumps(rows + failed, ensure_ascii=False, indent=1), encoding="utf-8")
     (run_dir / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     step(f"wrote {run_dir.relative_to(ROOT)}")
 
