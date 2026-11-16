@@ -1,9 +1,12 @@
 import time
+from datetime import date
 from typing import Any
 
 from ..exceptions import GoalError, NoJoinPathError
+from .drafting import draft_goal, goal_from_draft
 from .goal import Goal, grain_problems, resolve_goal
 from .graph import SchemaGraph
+from .linking import candidates_view, rank
 from .paths import JoinTree, join_tree
 from .sql import build_sql
 
@@ -133,3 +136,28 @@ def analyze(raw_goal: dict[str, Any], graph: SchemaGraph) -> dict[str, Any]:
     stage("path", started, **path)
     trace["sql"] = build_sql(goal, tree, graph)
     return trace
+
+
+def link_question(question: str, graph: SchemaGraph, model: Any, today: date) -> dict[str, Any]:
+    """The trace of one question taken from words to SQL over base tables (docs/specs/schema-link.md §5.1).
+
+    `linking` holds the ranked candidates, found without a model, and the goal the model drafted from them; the stages
+    after it are those of `analyze`. `status` is `not_found` when no candidate holds what the question measures.
+    """
+    started = time.monotonic()
+    candidates = candidates_view(rank(question, graph), graph)
+    ranked_ms = round((time.monotonic() - started) * 1000, 1)
+    started = time.monotonic()
+    draft = draft_goal(question, candidates, today, model)
+    linking = {
+        "question": question, "candidates": candidates, "ranked_ms": ranked_ms, "draft": draft.model_dump(),
+        "drafted_ms": round((time.monotonic() - started) * 1000, 1),
+    }
+    if not draft.found or not draft.measures:
+        reason = draft.reason or "Không bảng nào trong kho chứa thứ câu hỏi cần đo."
+        return {
+            "status": "not_found", "message": reason, "sql": None, "linking": linking,
+            "stages": {name: {"status": "pending", "ms": None} for name in STAGES},
+        }
+    goal = goal_from_draft(draft)
+    return {**analyze(goal, graph), "linking": {**linking, "goal": goal}}

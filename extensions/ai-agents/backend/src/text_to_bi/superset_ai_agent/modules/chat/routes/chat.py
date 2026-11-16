@@ -1,6 +1,6 @@
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from flask import Response, request, stream_with_context
 from flask_appbuilder.api import expose, permission_name, protect, safe
@@ -12,6 +12,7 @@ from superset_core.rest_api.decorators import api
 from ....common.exceptions import AgentError
 from ....common.utils.type_formatter import sse_event
 from ....core.chat_models import get_chat_model
+from ....core.config import BUSINESS_TIMEZONE
 from ....core.database import handle_errors, rollback_on_error
 from ....core.security import csrf_protected
 from ....migrations import ensure_agent_tables
@@ -32,8 +33,6 @@ from ..services.conversation import (
 from ..services.pipeline import AgentOutcome, MetricBuilder, run_agent
 
 logger = logging.getLogger(__name__)
-# "Hôm nay" and "tuần này" are read in Vietnam's time, whatever the server's clock zone.
-BUSINESS_TIMEZONE = timezone(timedelta(hours=7))
 FAILED_ANSWER_MESSAGE = "AI Agent không hoàn tất được câu trả lời."
 
 

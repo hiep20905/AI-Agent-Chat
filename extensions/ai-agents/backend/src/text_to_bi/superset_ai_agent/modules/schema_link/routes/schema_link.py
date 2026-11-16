@@ -1,15 +1,21 @@
+from datetime import datetime
+
 from flask import request
 from flask_appbuilder.api import expose, permission_name, protect, safe
 from flask_login import current_user
 from superset_core.rest_api.api import RestApi
 from superset_core.rest_api.decorators import api
 
+from ....core.chat_models import get_chat_model
+from ....core.config import BUSINESS_TIMEZONE
 from ....core.database import handle_errors
 from ....core.security import csrf_protected, is_admin
 from ...semantic_layer.services.data_model import cached_schema_graph
-from ..exceptions import AnalysisLabAdminRequiredError, DatabaseIdRequiredError
-from ..services.analysis import analyze, graph_view
+from ..exceptions import AnalysisLabAdminRequiredError, DatabaseIdRequiredError, LinkQuestionRequiredError
+from ..services.analysis import analyze, graph_view, link_question
 from ..services.graph import SchemaGraph
+
+MAX_QUESTION_LENGTH = 2000
 
 
 def _require_lab_access() -> None:
@@ -68,3 +74,22 @@ class AgentSchemaLinkAPI(RestApi):
         if not isinstance(database_id, int) or isinstance(database_id, bool):
             raise DatabaseIdRequiredError()
         return self.response(200, **analyze(body.get("goal") or {}, _schema_graph(database_id)))
+
+    @expose("/link", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @csrf_protected
+    @handle_errors
+    def link(self):
+        """A question taken to SQL: the ranked candidates, the goal the model drafted from them, and the four stages."""
+        _require_lab_access()
+        body = request.get_json(silent=True) or {}
+        database_id, question = body.get("database_id"), body.get("question")
+        if not isinstance(database_id, int) or isinstance(database_id, bool):
+            raise DatabaseIdRequiredError()
+        if not isinstance(question, str) or not question.strip() or len(question) > MAX_QUESTION_LENGTH:
+            raise LinkQuestionRequiredError()
+        today = datetime.now(BUSINESS_TIMEZONE).date()
+        graph = _schema_graph(database_id)
+        return self.response(200, **link_question(question.strip(), graph, get_chat_model(), today))

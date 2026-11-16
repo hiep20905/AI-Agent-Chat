@@ -61,6 +61,42 @@ export type AnalysisTrace = {
   message: string | null;
   sql: string | null;
   stages: { goal: GoalStage; nodes: NodesStage; graph: GraphStage; path: PathStage };
+  linking?: LinkingView;
+};
+
+/** A candidate column as the ranking found it: its role, the values shown, and what of the question matched it. */
+export type CandidateColumn = {
+  name: string;
+  label?: string;
+  role?: string;
+  unit?: string;
+  values?: unknown[];
+  score?: number;
+  matched?: string[];
+};
+
+export type CandidateTable = {
+  dataset_id: number;
+  table: string;
+  label?: string;
+  score: number;
+  reasons: string[];
+  row_kinds?: Array<{ value: string; label: string | null; grain: string }>;
+  columns: CandidateColumn[];
+};
+
+/** How a question was taken to a goal: candidates ranked without a model, then the goal the model drafted. */
+export type LinkingView = {
+  question: string;
+  ranked_ms: number;
+  drafted_ms: number;
+  candidates: {
+    tables: CandidateTable[];
+    indicators: Array<{ code: string; name: string | null; unit: string | null; score: number; matched: string[] }>;
+    values: Array<{ dataset_id: number; column: string; value: unknown }>;
+  };
+  draft: { found: boolean; reason: string };
+  goal?: unknown;
 };
 
 export async function canUseSchemaLinkLab(): Promise<boolean> {
@@ -79,4 +115,9 @@ export function getSchemaGraph(databaseId: number): Promise<GraphView> {
 
 export function analyzeGoal(databaseId: number, goal: unknown): Promise<AnalysisTrace> {
   return sendJson(`${SCHEMA_LINK_API}/analyze`, 'POST', { database_id: databaseId, goal });
+}
+
+/** A question taken to SQL: the ranked candidates, the drafted goal, then the same four stages as a goal. */
+export function linkQuestion(databaseId: number, question: string): Promise<AnalysisTrace> {
+  return sendJson(`${SCHEMA_LINK_API}/link`, 'POST', { database_id: databaseId, question });
 }

@@ -1,4 +1,9 @@
+from datetime import timedelta, timezone
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# "Hôm nay" and "tuần này" are read in Vietnam's time, whatever the server's clock zone.
+BUSINESS_TIMEZONE = timezone(timedelta(hours=7))
 
 
 class Settings(BaseSettings):

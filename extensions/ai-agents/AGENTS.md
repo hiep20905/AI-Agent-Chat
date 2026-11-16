@@ -348,7 +348,25 @@ code such as `nhiet_do_c` into the values table's column, the catalog's code
 filter and its aggregation; `paths.py` finds the join tree, Dijkstra from the
 root along many-to-one edges first and a directed Steiner tree otherwise;
 `sql.py` builds the SQL as a sqlglot tree; `analysis.py` tells the run as the
-four stages the page draws (goal, nodes, graph, chosen path). Administrators
-try it at `/ai-agent/?lab=schema-link` ("Thử phân tích dữ liệu"), writing the
-goal by hand; nothing runs the SQL yet, and questions do not reach it yet.
+four stages the page draws (goal, nodes, graph, chosen path).
+
+A question reaches a goal in two steps (`analysis.link_question`). `linking.py`
+ranks, with no model, what the question names: every column (by its label,
+synonyms, name and description), stored code value, indicator (by name and by
+code without its unit, "tong luong mua" for `tong_luong_mua_mm`) and table is
+matched against the question with accents and case set aside; a phrase named
+whole weighs by its length, so "nhiệt độ cao nhất" beats "nhiệt độ", a shared
+word by its rarity, and one word alone counts for nothing. A catalog of
+indicators is not matched on its values (how its indicators aggregate). The
+top 6 tables, 12 columns and 5 indicators are kept, plus the tables a measured
+table reaches by keys within two joins, where time, place and grouping live.
+`drafting.py` then makes one model call (`LINK_GOAL`) that picks among those
+candidates only: measures (an indicator or a measure column, or a row count),
+group by (time with a grain, or a label or dimension), filters (values as
+stored, dates from today) and the kind of row; `resolve_goal` checks it
+against the graph. Administrators try it at `/ai-agent/?lab=schema-link`
+("Thử phân tích dữ liệu"): a question shows its candidates with scores and
+why, the drafted goal (left in the editor to adjust) and the four stages; a
+goal can still be written by hand. Nothing runs the SQL yet, and chat
+questions do not reach it yet.
 `tests/fixtures/schema_graph_weather.json` is the sample warehouse's graph.

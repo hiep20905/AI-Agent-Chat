@@ -1,8 +1,8 @@
 import difflib
 import re
-import unicodedata
 from typing import Any
 
+from ....common.utils.text import normalized_text
 from ...semantic_layer.exceptions import SemanticLayerRefusedError
 
 # A metric query is run at most this many times: the first plan, then up to two repaired ones.
@@ -26,13 +26,6 @@ def refusal_kind(error: SemanticLayerRefusedError) -> str:
     if error.status_code in (400, 500):
         return "rejected_query"
     return "not_allowed"
-
-
-def normalized_text(value: Any) -> str:
-    """A value compared without accents, case or punctuation: "TP. Hồ Chí Minh" reads "tp ho chi minh"."""
-    decomposed = unicodedata.normalize("NFD", str(value).replace("đ", "d").replace("Đ", "D"))
-    plain = "".join(character for character in decomposed if not unicodedata.combining(character))
-    return " ".join(re.sub(r"[^0-9a-z]+", " ", plain.casefold()).split())
 
 
 def _digits(text: str) -> list[str]:

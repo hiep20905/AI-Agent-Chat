@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { FlaskConical, LoaderCircle, Route } from 'lucide-react';
-import { AnalysisTrace as Trace, GraphView, analyzeGoal, getSchemaGraph } from '../../shared/api/schemaLink';
+import { FlaskConical, LoaderCircle, MessageSquareText, Route } from 'lucide-react';
+import {
+  AnalysisTrace as Trace, GraphView, analyzeGoal, getSchemaGraph, linkQuestion,
+} from '../../shared/api/schemaLink';
 import { AnalysisTrace } from './AnalysisTrace';
+import { LinkingCandidates } from './LinkingCandidates';
 import { SchemaGraphView } from './SchemaGraphView';
 
 /**
- * Goals written by hand for the sample warehouse, until linking from a question exists. Tables are named by dataset
- * ID, as the schema graph lists them: 13 values, 15 observations, 10 cities, 14 data loads.
+ * Goals written by hand for the sample warehouse, to try a goal without the model. Tables are named by dataset ID, as
+ * the schema graph lists them: 13 values, 15 observations, 10 cities, 14 data loads.
  */
 const PRESETS: Array<{ label: string; goal: unknown }> = [
   {
@@ -58,6 +61,7 @@ const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 export function SchemaLinkLab() {
   const [databaseId, setDatabaseId] = useState(1);
   const [goalText, setGoalText] = useState(pretty(PRESETS[0].goal));
+  const [question, setQuestion] = useState('Nhiệt độ trung bình theo giờ ở Hà Nội hôm qua');
   const [graph, setGraph] = useState<GraphView | null>(null);
   const [graphError, setGraphError] = useState('');
   const [trace, setTrace] = useState<Trace | null>(null);
@@ -102,6 +106,25 @@ export function SchemaLinkLab() {
     }
   };
 
+  const runQuestion = async () => {
+    setError('');
+    if (!question.trim()) {
+      setError('Nhập câu hỏi.');
+      return;
+    }
+    setRunning(true);
+    try {
+      const found = await linkQuestion(databaseId, question.trim());
+      setTrace(found);
+      // The drafted goal goes to the editor, to adjust by hand and analyse again.
+      if (found.linking?.goal) setGoalText(pretty(found.linking.goal));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Không phân tích được câu hỏi.');
+    } finally {
+      setRunning(false);
+    }
+  };
+
   return (
     <div className="ai-lab">
       <header className="ai-lab-header">
@@ -109,12 +132,25 @@ export function SchemaLinkLab() {
         <div>
           <h1>Thử phân tích dữ liệu</h1>
           <p>
-            Viết mục tiêu bằng tay để xem schema link tìm bảng, dựng đồ thị và chọn đường join trên base table. Câu hỏi
-            tự nhiên sẽ được chuyển thành mục tiêu ở bước sau; SQL ở đây chỉ được dựng, chưa chạy.
+            Hỏi bằng câu tự nhiên, hoặc viết mục tiêu bằng tay, để xem schema link tìm bảng và cột ứng viên, dựng đồ thị
+            và chọn đường join trên base table. SQL ở đây chỉ được dựng, chưa chạy.
           </p>
         </div>
       </header>
       <div className="ai-lab-input">
+        <div className="ai-lab-question">
+          <input
+            aria-label="Câu hỏi" value={question} placeholder="Ví dụ: Tổng lượng mưa theo vùng tháng này"
+            onChange={event => setQuestion(event.target.value)}
+            onKeyDown={event => { if (event.key === 'Enter' && !running) void runQuestion(); }}
+          />
+          <button type="button" className="ai-lab-run" disabled={running} onClick={() => void runQuestion()}>
+            {running
+              ? <LoaderCircle className="ai-spin" aria-hidden="true" />
+              : <MessageSquareText aria-hidden="true" />}
+            Phân tích câu hỏi
+          </button>
+        </div>
         <div className="ai-lab-controls">
           <label>
             Database ID
@@ -131,7 +167,7 @@ export function SchemaLinkLab() {
           </label>
           <button type="button" className="ai-lab-run" disabled={running} onClick={() => void run()}>
             {running ? <LoaderCircle className="ai-spin" aria-hidden="true" /> : <Route aria-hidden="true" />}
-            {running ? 'Đang phân tích…' : 'Phân tích'}
+            {running ? 'Đang phân tích…' : 'Phân tích mục tiêu'}
           </button>
         </div>
         <textarea
@@ -140,6 +176,7 @@ export function SchemaLinkLab() {
         />
         {error ? <p className="ai-page-state is-error" role="alert">{error}</p> : null}
       </div>
+      {trace?.linking ? <LinkingCandidates linking={trace.linking} /> : null}
       {trace && graph ? <AnalysisTrace trace={trace} fallbackGraph={graph} /> : null}
       {!trace && graph ? (
         <SchemaGraphView

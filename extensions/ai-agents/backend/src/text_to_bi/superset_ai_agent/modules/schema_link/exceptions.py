@@ -21,3 +21,7 @@ class AnalysisLabAdminRequiredError(NotAuthorizedError):
 
 class DatabaseIdRequiredError(ValidationError):
     message = "Cần database_id."
+
+
+class LinkQuestionRequiredError(ValidationError):
+    message = "Cần câu hỏi (tối đa 2000 ký tự)."

@@ -250,11 +250,13 @@ trả về cả tầng dữ liệu của từng bảng.
 3. **Semantic Layer: `/schema-graph` (4.5)**, có test quyền: người không được xem bảng thì không thấy đỉnh và cạnh của
    bảng đó.
 4. **AI Agent: thuật toán đồ thị và sinh SQL (5.2–5.3)**, kèm trang "Thử phân tích dữ liệu" cho quản trị viên
-   (`/ai-agent/?lab=schema-link`): nhập mục tiêu dạng JSON, xem bốn chặng của 5.5 và SQL đã dựng. Đã làm 26/10/2026. Python thuần, test trên đồ thị của kho mẫu và các đồ thị tự
-   dựng: nhiều đường, nhân dòng, không có đường.
-5. **AI Agent: linking, chạy và trả lời (5.1, 5.4)**, gắn vào ladder thay cho đề xuất dataset.
-6. **AI Agent: hiển thị quá trình linking (5.5).**
-7. **Nghiệm thu** bằng các câu hỏi chỉ base table trả lời được (mục 7).
+   (`/ai-agent/?lab=schema-link`): nhập mục tiêu dạng JSON, xem bốn chặng của 5.5 và SQL đã dựng. Đã làm 26/10/2026.
+   Python thuần, test trên đồ thị của kho mẫu và các đồ thị tự dựng: nhiều đường, nhân dòng, không có đường.
+5. **AI Agent: linking (5.1).** Đã làm 13/11/2026: `linking.py` xếp hạng ứng viên không dùng model, `drafting.py` một
+   lần gọi model chọn trong ứng viên; trang thử nhận câu hỏi tự nhiên và hiện ứng viên kèm điểm.
+6. **AI Agent: chạy và trả lời (5.4)**, gắn vào ladder thay cho đề xuất dataset.
+7. **AI Agent: hiển thị quá trình linking trên trang AI Agent (5.5).**
+8. **Nghiệm thu** bằng các câu hỏi chỉ base table trả lời được (mục 7).
 
 Bước 1–3 dùng được ngay cho quản trị và không đổi câu trả lời của agent.
 
