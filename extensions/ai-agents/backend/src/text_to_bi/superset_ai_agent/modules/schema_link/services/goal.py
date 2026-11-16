@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from ...chat.services.query import OPERATORS
+from ...chat.services.query import OPERATORS, PERSONAL_DATA
 from ..exceptions import GoalError
 from .graph import SchemaGraph
 
@@ -174,7 +174,7 @@ def resolve_goal(raw: dict[str, Any], graph: SchemaGraph) -> Goal:
         table = _table(graph, item, "Chia theo")
         column = _column(graph, table, item.get("column"), "Chia theo")
         if column.get("contains_pii"):
-            raise GoalError(f"Chia theo: cột {column['name']} chứa dữ liệu cá nhân: chỉ dùng được trong số tổng hợp (đếm, trung bình…), không nhóm hay lọc theo giá trị của từng người.")
+            raise GoalError(f"Chia theo: cột {column['name']} {PERSONAL_DATA}")
         grain = item.get("time_grain")
         if grain is not None and (grain not in TIME_GRAINS or not column.get("temporal_kind")):
             raise GoalError(f"Chia theo: {column['name']} không gom theo {grain!r} được.")
@@ -184,7 +184,7 @@ def resolve_goal(raw: dict[str, Any], graph: SchemaGraph) -> Goal:
         table = _table(graph, item, "Lọc")
         column = _column(graph, table, item.get("column"), "Lọc")
         if column.get("contains_pii"):
-            raise GoalError(f"Lọc: cột {column['name']} chứa dữ liệu cá nhân: chỉ dùng được trong số tổng hợp (đếm, trung bình…), không nhóm hay lọc theo giá trị của từng người.")
+            raise GoalError(f"Lọc: cột {column['name']} {PERSONAL_DATA}")
         operator, value = item.get("operator"), item.get("value")
         if operator not in OPERATORS or value is None or (operator in ("IN", "NOT IN")) != isinstance(value, list):
             raise GoalError(f"Lọc {column['name']}: toán tử hoặc giá trị không hợp lệ.")

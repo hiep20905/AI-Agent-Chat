@@ -12,6 +12,11 @@ MAX_METRICS = 3
 MAX_DIMENSIONS = 2
 MAX_FILTERS = 12
 MAX_LIMIT = 100
+# Why a column marked as personal data cannot group or filter a query (docs/specs/taxonomy-cau-hoi.md §4.1).
+PERSONAL_DATA = (
+    "chứa dữ liệu cá nhân: chỉ dùng được trong số tổng hợp (đếm, trung bình…), không nhóm hay lọc theo giá trị của "
+    "từng người."
+)
 # Rows the final answer reads; the browser receives every row the Semantic Layer returned.
 ROWS_FOR_ANSWER = 60
 NUMERIC_TYPES = ("INT", "NUMERIC", "DECIMAL", "FLOAT", "DOUBLE", "REAL", "BIGINT", "SMALLINT")
@@ -144,7 +149,7 @@ def _checked_filter(
     if column is None or not column.get("filterable"):
         raise QueryPlanError(f"Không lọc được theo cột “{item.get('column')}”.")
     if column.get("contains_pii"):
-        raise QueryPlanError(f"Cột “{column['name']}” chứa dữ liệu cá nhân: chỉ dùng được trong số tổng hợp (đếm, trung bình…), không nhóm hay lọc theo giá trị của từng người.")
+        raise QueryPlanError(f"Cột “{column['name']}” {PERSONAL_DATA}")
     operator = item.get("operator")
     if operator not in OPERATORS:
         raise QueryPlanError(f"Phép so sánh “{operator}” không được hỗ trợ.")
@@ -314,7 +319,7 @@ def plan_query(
         if column is None or not column.get("groupby"):
             raise QueryPlanError(f"Không nhóm được theo cột “{name}”.")
         if column.get("contains_pii"):
-            raise QueryPlanError(f"Cột “{name}” chứa dữ liệu cá nhân: chỉ dùng được trong số tổng hợp (đếm, trung bình…), không nhóm hay lọc theo giá trị của từng người.")
+            raise QueryPlanError(f"Cột “{name}” {PERSONAL_DATA}")
         dimension = {"name": name, "label": column.get("label") or name, "temporal": bool(column.get("temporal"))}
         if name in value_labels:
             # A key is shown by its labels, so it is named like them: "Thành phố" rather than "Khóa thành phố".
