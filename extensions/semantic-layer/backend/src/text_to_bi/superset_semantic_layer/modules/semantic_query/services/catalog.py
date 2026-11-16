@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
@@ -5,6 +6,25 @@ from .contracts import contract_is_approved_current
 from .relationships import RelationshipEnd, relationship_is_approved_current
 
 FILTER_OPERATORS = ["==", "!=", "<", "<=", ">", ">=", "IN", "NOT IN"]
+_OUTER_AGGREGATE = re.compile(r"\s*(SUM|COUNT|AVG|MIN|MAX)\s*\(", re.IGNORECASE)
+
+
+def metric_aggregation(expression: str | None) -> str | None:
+    """The aggregate a metric expression is wrapped in whole, which tells a consumer whether its values add up across
+    groups (SUM, COUNT) or not (AVG, MIN, MAX, COUNT_DISTINCT); None for anything else, such as a ratio of two."""
+    match = _OUTER_AGGREGATE.match(expression or "")
+    if not match:
+        return None
+    depth, inner_start = 0, match.end() - 1
+    for index in range(inner_start, len(expression)):
+        depth += {"(": 1, ")": -1}.get(expression[index], 0)
+        if depth == 0:
+            if expression[index + 1:].strip():
+                return None
+            name = match.group(1).upper()
+            distinct = name == "COUNT" and expression[inner_start + 1:index].strip().upper().startswith("DISTINCT")
+            return "COUNT_DISTINCT" if distinct else name
+    return None
 
 
 def build_semantic_catalog(
@@ -49,6 +69,7 @@ def build_semantic_catalog(
                 "verbose_name": getattr(metric, "verbose_name", None),
                 "description": getattr(metric, "description", None),
                 "d3format": getattr(metric, "d3format", None),
+                "aggregation": metric_aggregation(getattr(metric, "expression", None)),
                 "query_defaults": defaults.as_dict() if defaults else None,
                 **(metric_details(dataset.id, metric.id) if metric_details else {}),
             }

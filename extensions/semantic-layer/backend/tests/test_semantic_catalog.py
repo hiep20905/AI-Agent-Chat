@@ -1,6 +1,11 @@
 from types import SimpleNamespace
 
-from text_to_bi.superset_semantic_layer.modules.semantic_query.services.catalog import build_semantic_catalog
+import pytest
+
+from text_to_bi.superset_semantic_layer.modules.semantic_query.services.catalog import (
+    build_semantic_catalog,
+    metric_aggregation,
+)
 from text_to_bi.superset_semantic_layer.modules.semantic_query.services.contracts import metric_contract_hash
 from text_to_bi.superset_semantic_layer.modules.semantic_query.services.query_defaults import MetricQueryDefaults
 from text_to_bi.superset_semantic_layer.modules.semantic_query.services.relationships import (
@@ -60,6 +65,7 @@ def test_catalog_hides_inaccessible_stale_and_sensitive_contract_details():
                     "verbose_name": "Average",
                     "description": "Safe",
                     "d3format": None,
+                    "aggregation": "AVG",
                     "query_defaults": None,
                 }
             ],
@@ -166,6 +172,7 @@ def test_catalog_adds_business_context_only_to_visible_metrics():
             "verbose_name": "Max",
             "description": None,
             "d3format": ",.1f",
+            "aggregation": "MAX",
             "query_defaults": None,
             "business_definition": "Highest daily temperature.",
             "unit": "°C",
@@ -192,3 +199,19 @@ def test_catalog_lists_query_defaults_and_drops_a_metric_whose_defaults_changed_
     listed = current["datasets"][0]["metrics"][0]["query_defaults"]
     assert listed["grain"] == "day" and listed["time_window"] == "last_7_day" and listed["default_filters"] == []
     assert changed["datasets"] == []
+
+
+@pytest.mark.parametrize(
+    ("expression", "aggregation"),
+    [
+        ("SUM(CASE WHEN loai_quan_sat = 'DU_BAO_NGAY' THEN tong_luong_mua_mm END)", "SUM"),
+        ("count(*)", "COUNT"),
+        ("COUNT(DISTINCT thanh_pho_key)", "COUNT_DISTINCT"),
+        ("AVG(nhiet_do_c)", "AVG"),
+        ("SUM(a) / SUM(b)", None),
+        ("100.0 * COUNT(CASE WHEN x > 0 THEN 1 END) / NULLIF(COUNT(*), 0)", None),
+        (None, None),
+    ],
+)
+def test_a_metric_names_the_aggregate_its_whole_expression_is_wrapped_in(expression, aggregation):
+    assert metric_aggregation(expression) == aggregation
