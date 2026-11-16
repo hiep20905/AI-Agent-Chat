@@ -21,6 +21,9 @@ const TOOL_LABELS: Record<string, string> = {
   create_metric: 'Lưu metric chờ quản trị viên duyệt',
   draft_dataset: 'Không có bảng tổng hợp phù hợp: soạn dataset từ bảng cơ sở',
   propose_dataset: 'Gửi đề xuất dataset cho quản trị viên',
+  load_schema_graph: 'Không có bảng tổng hợp phù hợp: đọc đồ thị bảng gốc',
+  link_question: 'Chọn bảng, cột và đường nối trên bảng gốc',
+  run_sql: 'Chạy truy vấn trên dữ liệu gốc',
   // Steps of conversations answered before the steps were merged.
   rewrite_question: 'Viết lại câu hỏi',
   identify_glossary_terms: 'Xác định thuật ngữ',

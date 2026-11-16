@@ -454,7 +454,15 @@ export function QueryResultView({ result }: { result: QueryResult }) {
         <div className="ai-result-heading">
           <strong>
             {result.scope || 'Số liệu'}
-            {result.provisional && (
+            {result.provisional && result.source === 'base_tables' && (
+              <span
+                className="ai-result-provisional"
+                title="Tính trực tiếp từ bảng gốc, nối theo quan hệ đã duyệt; chưa có chỉ số được duyệt"
+              >
+                Tạm tính · từ dữ liệu gốc
+              </span>
+            )}
+            {result.provisional && result.source !== 'base_tables' && (
               <span className="ai-result-provisional" title="Metric AI Agent dựng từ bảng tổng hợp, chưa được duyệt">
                 Tạm tính · chờ duyệt
               </span>

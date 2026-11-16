@@ -27,7 +27,7 @@ def _source_entry(dataset: dict[str, Any], members: dict[str, Any]) -> dict[str,
         **dataset_entry({"id": dataset["id"], "name": dataset.get("name"), "dimensions": []}, members),
         "columns": dataset.get("columns", []),
     }
-    for key in ("label", "description", "grain", "metrics"):
+    for key in ("label", "description", "grain", "metrics", "database_id"):
         if dataset.get(key):
             entry[key] = dataset[key]
     return entry
@@ -63,6 +63,18 @@ def cached_schema_graph(user_id: int, database_id: int, cookie_header: str) -> d
 
 
 def propose_agent_dataset(draft: dict[str, Any], cookie_header: str, csrf_token: str) -> dict[str, Any]:
-    """Keep the dataset the agent drafted over base datasets for an administrator; returns the proposal."""
+    """Keep the dataset the agent drafted over base datasets for an administrator.
+
+    Returns `{"proposal": …}`, the proposal kept (a new one, or the same query already proposed), or
+    `{"existing_dataset": {"id", "name"}}` when a virtual dataset already holds that query.
+    """
     path = f"{SEMANTIC_LAYER_API}/agent-dataset-proposals"
-    return post_json(path, draft, cookie_header, csrf_token, "gửi đề xuất dataset")["proposal"]
+    answer = post_json(path, draft, cookie_header, csrf_token, "gửi đề xuất dataset")
+    return {key: answer[key] for key in ("proposal", "existing_dataset") if answer.get(key)}
+
+
+def run_agent_sql(sql: str, cookie_header: str, csrf_token: str) -> dict[str, Any]:
+    """Run a read-only SELECT over base tables through the Semantic Layer, as the user: `columns`, `rows`,
+    `row_count`, `truncated`, and `sql` for administrators."""
+    path = f"{SEMANTIC_LAYER_API}/agent-sql"
+    return post_json(path, {"sql": sql}, cookie_header, csrf_token, "chạy SQL trên bảng gốc")

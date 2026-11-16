@@ -38,10 +38,13 @@ class FakeBuilder:
         self.created, self.proposed = [], []
         self.reads = 0
         self.propose_dataset = self._propose if proposes else None
+        # No schema graph: a question no aggregate dataset answers goes to the dataset proposal, as before schema link.
+        self.load_schema_graph = None
+        self.run_sql = None
 
     def _propose(self, draft):
         self.proposed.append(draft)
-        return {"id": 5, "name": draft["name"], "label": draft["label"], "status": "pending"}
+        return {"proposal": {"id": 5, "name": draft["name"], "label": draft["label"], "status": "pending"}}
 
     def load_sources(self):
         self.reads += 1

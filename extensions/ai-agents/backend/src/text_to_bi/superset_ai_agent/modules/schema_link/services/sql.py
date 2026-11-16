@@ -85,3 +85,50 @@ def build_sql(goal: Goal, tree: JoinTree, graph: SchemaGraph) -> str:
         query = query.group_by(*[expression.copy() for expression in groups])
         query = query.order_by(*[expression.copy() for expression in groups])
     return query.limit(goal.limit).sql(dialect=dialect, pretty=True)
+
+
+def build_dataset_sql(goal: Goal, tree: JoinTree, graph: SchemaGraph) -> tuple[str, list[str | None], list[str]]:
+    """A reusable virtual dataset behind the goal: one row per row of the root table, joined as the tree joins, with the
+    columns the goal measures, groups or filters by and each joined table's time column.
+
+    Only the conditions that define what a row is are kept (the indicator's code, the kind of row); the asked period
+    and place are left to whoever queries the dataset, so it answers other periods and places too. Returns the SQL,
+    per measure the name of the column it aggregates (None when it counts rows), and every column name selected.
+    """
+    dialect = DIALECTS.get(graph.dialect, "postgres")
+    aliases = {table: f"t{index}" for index, table in enumerate(tree.tables)}
+
+    def table(table_id: int) -> exp.Expression:
+        node = graph.tables[table_id]
+        return exp.table_(node["table"], db=node.get("schema"), alias=aliases[table_id], quoted=True)
+
+    def column(table_id: int, name: str) -> exp.Expression:
+        return exp.column(name, table=aliases[table_id], quoted=True)
+
+    query = exp.select().from_(table(tree.root))
+    for step in tree.steps:
+        joined_on = exp.EQ(this=column(step.start, step.start_column), expression=column(step.end, step.end_column))
+        query = query.join(table(step.end), on=joined_on)
+
+    wanted = [(measure.table, measure.column) for measure in goal.measures if measure.column]
+    wanted += [(item.table, item.column) for item in goal.group_by]
+    wanted += [(item.table, item.column) for item in goal.filters if item.source != "chỉ số"]
+    wanted += [
+        (table_id, (graph.tables[table_id].get("time") or {}).get("column")) for table_id in tree.tables
+    ]
+    taken: set[str] = set()
+    names: dict[tuple[int, str], str] = {}
+    for table_id, name in wanted:
+        if name and (table_id, name) not in names and graph.column(table_id, name) is not None:
+            names[(table_id, name)] = _alias(name, taken)
+            query = query.select(exp.alias_(column(table_id, name), names[(table_id, name)], quoted=True))
+
+    conditions = [
+        _condition(column(item.table, item.column), item.operator, item.value)
+        for item in goal.filters if item.source == "chỉ số"
+    ]
+    conditions += [_condition(column(item.table, item.column), "==", item.value) for item in goal.row_kinds]
+    if conditions:
+        query = query.where(exp.and_(*conditions))
+    measured = [names.get((measure.table, measure.column)) if measure.column else None for measure in goal.measures]
+    return query.sql(dialect=dialect, pretty=True), measured, list(names.values())

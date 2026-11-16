@@ -135,7 +135,7 @@ class _Contracts:
 
 def _schema_graph_api(datasets, access, rls, contracts):
     """The schema_graph route with Superset, the session and the per-table reads stubbed."""
-    route_class = api_class({"schema_graph", "_has_row_level_security"})
+    route_class = api_class({"schema_graph"})
     route_class.bases = []
 
     class Query:
@@ -164,8 +164,7 @@ def _schema_graph_api(datasets, access, rls, contracts):
         "ensure_dictionary_tables": lambda: None,
         "can_access_dataset": lambda dataset: access[dataset.id],
         "request": SimpleNamespace(args=SimpleNamespace(get=lambda name, type=None: 1)),
-        "security_manager": SimpleNamespace(get_rls_filters=lambda dataset: rls.get(dataset.id, [])),
-        "logger": SimpleNamespace(warning=lambda *args, **kwargs: None),
+        "has_row_level_security": lambda dataset: bool(rls.get(dataset.id, [])),
         "ColumnDictionaryRepository": lambda _session: SimpleNamespace(
             get_for_dataset_column=lambda dataset_id, column: SimpleNamespace(
                 dataset_id=dataset_id, column_name=column
@@ -217,9 +216,13 @@ def test_the_route_hides_unreadable_tables_and_tables_under_rls_with_their_edges
     assert graph["excluded"] == [{"dataset_id": 6, "table": "dm_chi_so_thoi_tiet", "reason": "row_level_security"}]
 
 
-def test_unreadable_rls_rules_count_as_a_rule():
-    api = _schema_graph_api([], access={}, rls={}, contracts=[])
-    namespace_manager = api._has_row_level_security.__globals__["security_manager"]
-    namespace_manager.get_rls_filters = lambda dataset: (_ for _ in ()).throw(RuntimeError("no rules table"))
+def test_unreadable_rls_rules_count_as_a_rule(monkeypatch):
+    from text_to_bi.superset_semantic_layer.core import security
 
-    assert api._has_row_level_security(SimpleNamespace(table_name="dm_thanh_pho")) is True
+    def unreadable(dataset):
+        raise RuntimeError("no rules table")
+
+    monkeypatch.setattr(security, "security_manager", SimpleNamespace(get_rls_filters=unreadable))
+    assert security.has_row_level_security(SimpleNamespace(table_name="dm_thanh_pho")) is True
+    monkeypatch.setattr(security, "security_manager", SimpleNamespace(get_rls_filters=lambda dataset: []))
+    assert security.has_row_level_security(SimpleNamespace(table_name="dm_thanh_pho")) is False

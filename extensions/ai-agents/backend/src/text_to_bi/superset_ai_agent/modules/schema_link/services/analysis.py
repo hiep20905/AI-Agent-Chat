@@ -138,17 +138,20 @@ def analyze(raw_goal: dict[str, Any], graph: SchemaGraph) -> dict[str, Any]:
     return trace
 
 
-def link_question(question: str, graph: SchemaGraph, model: Any, today: date) -> dict[str, Any]:
+def link_question(
+    question: str, graph: SchemaGraph, model: Any, today: date, feedback: str | None = None,
+) -> dict[str, Any]:
     """The trace of one question taken from words to SQL over base tables (docs/specs/schema-link.md §5.1).
 
     `linking` holds the ranked candidates, found without a model, and the goal the model drafted from them; the stages
     after it are those of `analyze`. `status` is `not_found` when no candidate holds what the question measures.
+    `feedback` tells the model why the goal it drafted before failed, when this is another try.
     """
     started = time.monotonic()
     candidates = candidates_view(rank(question, graph), graph)
     ranked_ms = round((time.monotonic() - started) * 1000, 1)
     started = time.monotonic()
-    draft = draft_goal(question, candidates, today, model)
+    draft = draft_goal(question, candidates, today, model, feedback)
     linking = {
         "question": question, "candidates": candidates, "ranked_ms": ranked_ms, "draft": draft.model_dump(),
         "drafted_ms": round((time.monotonic() - started) * 1000, 1),

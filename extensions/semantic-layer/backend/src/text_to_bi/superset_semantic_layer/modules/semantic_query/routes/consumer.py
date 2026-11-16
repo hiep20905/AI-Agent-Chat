@@ -3,12 +3,16 @@ from typing import Any
 
 from flask import request
 from flask_appbuilder.api import expose, permission_name, protect, safe
-from superset import security_manager
 from superset.connectors.sqla.models import SqlaTable
 
 from ....core.database import handle_errors
 from ....core.exceptions import DatabaseIdRequiredError
-from ....core.security import can_access_dataset, is_superset_access_error, require_dataset_access
+from ....core.security import (
+    can_access_dataset,
+    has_row_level_security,
+    is_superset_access_error,
+    require_dataset_access,
+)
 from ....migrations import ensure_dictionary_tables
 from ...agent_ladder.services.agent_ladder import AGGREGATE_DATASET
 from ...business_model.dependencies import data_layer_repository
@@ -156,15 +160,6 @@ class ConsumerRoutes:
         label_catalog_pii(catalog["datasets"])
         return self.response(200, **catalog)
 
-    @staticmethod
-    def _has_row_level_security(dataset: SqlaTable) -> bool:
-        """Whether a row-level security rule applies to the caller on this dataset; unreadable counts as yes."""
-        try:
-            return bool(security_manager.get_rls_filters(dataset))
-        except Exception:
-            logger.warning("Reading the RLS rules of %s failed", dataset.table_name, exc_info=True)
-            return True
-
     @expose("/schema-graph", methods=("GET",))
     @protect()
     @safe
@@ -185,7 +180,7 @@ class ConsumerRoutes:
         for dataset in base_tables(database_id):
             if not can_access_dataset(dataset):
                 continue
-            if self._has_row_level_security(dataset):
+            if has_row_level_security(dataset):
                 excluded.append({"dataset_id": dataset.id, "table": dataset.table_name, "reason": "row_level_security"})
                 continue
             nodes.append(self._schema_graph_node(dataset))

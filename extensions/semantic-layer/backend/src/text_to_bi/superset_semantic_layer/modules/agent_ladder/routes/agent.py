@@ -5,13 +5,21 @@ from typing import Any
 from flask import request
 from flask_appbuilder.api import expose, permission_name, protect, safe
 from flask_login import current_user
+from sqlalchemy import text
 from superset import db
 from superset.connectors.sqla.models import SqlaTable, SqlMetric
 
 from ....common.utils.type_formatter import iso_datetime
 from ....core.database import handle_errors, rollback_on_error
 from ....core.exceptions import DatasetIdRequiredError
-from ....core.security import can_access_dataset, csrf_protected, require_admin, require_dataset_access
+from ....core.security import (
+    can_access_dataset,
+    csrf_protected,
+    has_row_level_security,
+    is_admin,
+    require_admin,
+    require_dataset_access,
+)
 from ....migrations import ensure_dictionary_tables
 from ...business_model.dependencies import lineage_edge_repository
 from ...business_model.models import LineageEdge
@@ -22,6 +30,7 @@ from ...semantic_query.dependencies import metric_contract_repository, metric_de
 from ...semantic_query.models import MetricContract, MetricDefinition
 from ...semantic_query.services.chart_data import coded_values
 from ...semantic_query.services.contracts import metric_contract_hash, metric_contract_state
+from ...semantic_query.services.limits import semantic_query_row_cap
 from ...semantic_query.services.metric_review import (
     metric_contract_for,
     metric_definition_for,
@@ -30,7 +39,7 @@ from ...semantic_query.services.metric_review import (
     record_metric_event,
     review_reason,
 )
-from ...superset.services.datasets import get_datasets, is_internal_dataset, require_dataset
+from ...superset.services.datasets import datasets_on_database, get_datasets, is_internal_dataset, require_dataset
 from ...superset.services.users import user_names
 from ..dependencies import dataset_proposal_repository
 from ..exceptions import (
@@ -48,16 +57,21 @@ from ..models import DatasetProposal
 from ..services.agent_ladder import (
     AGENT_DATASET_TYPES,
     AGENT_ORIGIN,
+    AGENT_SQL_TIMEOUT_MS,
     AGGREGATE_DATASET,
     BASE_DATASET,
     MAX_PENDING_AGENT_METRICS,
     MAX_PENDING_PROPOSALS,
+    agent_query_sql,
     asked_question,
     checked_dataset_proposal,
+    checked_dataset_sql,
     checked_metric_draft,
     derived_column_keys,
     is_default_count,
+    json_value,
     matching_metric,
+    matching_virtual_dataset,
     source_columns,
     source_metric,
     unique_metric_name,
@@ -139,6 +153,8 @@ class AgentLadderRoutes:
                 {
                     "id": dataset.id,
                     "name": dataset.table_name,
+                    # Schema link reads the base tables of one database connection at a time.
+                    "database_id": dataset.database_id,
                     "label": dictionary.display_name,
                     "dataset_type": dictionary.dataset_type,
                     "description": dictionary.description,
@@ -290,6 +306,55 @@ class AgentLadderRoutes:
             "dataset_id": proposal.dataset_id,
         }
 
+    @expose("/agent-sql", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("read")
+    @csrf_protected
+    @handle_errors
+    def run_agent_sql(self):
+        """Run one read-only SELECT the AI Agent built over base tables, as the caller, and return its rows.
+
+        Only base datasets the caller may read count, and not one a row-level security rule applies to: a rule is tied
+        to its dataset, and SQL over the table would not apply it. The query runs in a read-only transaction with a
+        time limit and returns at most the semantic query row cap; administrators also get the SQL that ran.
+        """
+        ensure_dictionary_tables()
+        allowed = {
+            name: dataset for name, dataset in self._base_datasets(for_agent=True).items()
+            if not has_row_level_security(dataset)
+        }
+        checked = checked_dataset_sql((request.get_json(silent=True) or {}).get("sql"), allowed)
+        if len({dataset.database_id for dataset in checked.source_datasets}) != 1:
+            raise AgentLadderValidationError("Các bảng phải cùng một kết nối cơ sở dữ liệu.")
+        source = checked.source_datasets[0]
+        row_cap = semantic_query_row_cap()
+        # A colon in a literal ("12:30", "::date") is text, not a bind parameter.
+        statement = text(agent_query_sql(checked.sql, row_cap).replace(":", "\\:"))
+        try:
+            with (
+                source.database.get_sqla_engine(schema=source.schema) as engine,
+                engine.connect() as connection,
+                connection.begin(),
+            ):
+                if engine.dialect.name == "postgresql":
+                    connection.execute(text("SET TRANSACTION READ ONLY"))
+                    connection.execute(text(f"SET LOCAL statement_timeout = {AGENT_SQL_TIMEOUT_MS}"))
+                answer = connection.execute(statement)
+                columns = list(answer.keys())
+                rows = [dict(zip(columns, map(json_value, row))) for row in answer.fetchall()]
+        except Exception:
+            logger.exception("Running the AI Agent's SQL over base tables failed")
+            return self.response_500(message="Không chạy được câu SQL trên cơ sở dữ liệu.")
+        return self.response(
+            200,
+            columns=columns,
+            rows=rows[:row_cap],
+            row_count=min(len(rows), row_cap),
+            truncated=len(rows) > row_cap,
+            sql=checked.sql if is_admin() else None,
+        )
+
     @expose("/agent-dataset-proposals", methods=("POST",))
     @protect()
     @safe
@@ -300,15 +365,22 @@ class AgentLadderRoutes:
     def propose_agent_dataset(self):
         """Keep the dataset the AI Agent drafted over base datasets for an administrator; nothing runs until then.
 
-        The same SQL already waiting for review is returned instead of a second proposal.
+        A dataset is never proposed twice: a virtual dataset already defined by the same query is returned as
+        `existing_dataset`, and the same query already waiting for review or already made into a dataset is returned as
+        its proposal. Queries count as the same whatever their spacing, quoting or case (`canonical_sql`).
         """
         ensure_dictionary_tables()
         values = checked_dataset_proposal(request.get_json(silent=True), self._base_datasets(for_agent=True))
+        virtual = datasets_on_database(values["database_id"]).filter(SqlaTable.sql.isnot(None)).all()
+        readable = [dataset for dataset in virtual if can_access_dataset(dataset)]
+        existing = matching_virtual_dataset(values["sql"], readable)
+        if existing is not None:
+            return self.response(200, existing_dataset={"id": existing.id, "name": existing.table_name})
         user_name = user_names()
         proposal_repository = dataset_proposal_repository()
-        waiting = proposal_repository.pending_with_fingerprint(values["sql_fingerprint"])
-        if waiting is not None:
-            return self.response(200, proposal=self._serialize_dataset_proposal(waiting, user_name))
+        kept = proposal_repository.kept_with_fingerprint(values["sql_fingerprint"])
+        if kept is not None:
+            return self.response(200, proposal=self._serialize_dataset_proposal(kept, user_name))
         if proposal_repository.pending_count() >= MAX_PENDING_PROPOSALS:
             raise TooManyPendingProposalsError()
         proposal = DatasetProposal(

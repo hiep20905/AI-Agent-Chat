@@ -18,7 +18,12 @@ from ....core.security import csrf_protected
 from ....migrations import ensure_agent_tables
 from ...definitions.services.definitions import definitions_for_agent
 from ...semantic_layer.services.catalog import cached_semantic_catalog
-from ...semantic_layer.services.data_model import cached_data_model_sources, propose_agent_dataset
+from ...semantic_layer.services.data_model import (
+    cached_data_model_sources,
+    cached_schema_graph,
+    propose_agent_dataset,
+    run_agent_sql,
+)
 from ...semantic_layer.services.metrics import create_agent_metric, run_metric_query
 from ...sessions.services.sessions import require_own_session, start_session, touch_session
 from ...superset.services.dashboards import dashboard_titles, require_dashboard_access
@@ -102,6 +107,10 @@ class TextToBIAgentAPI(RestApi):
                         load_sources=lambda: cached_data_model_sources(user_id, cookie_header),
                         create_metric=lambda draft: create_agent_metric(draft, cookie_header, csrf_token),
                         propose_dataset=lambda draft: propose_agent_dataset(draft, cookie_header, csrf_token),
+                        load_schema_graph=lambda database_id: cached_schema_graph(
+                            user_id, database_id, cookie_header,
+                        ),
+                        run_sql=lambda sql: run_agent_sql(sql, cookie_header, csrf_token),
                     ),
                     dashboard=dashboard_title,
                     previous=previous,

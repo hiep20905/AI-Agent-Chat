@@ -87,6 +87,10 @@ export type QueryResult = {
   notes: string[];
   /** True when the metric is one the agent built on an aggregate dataset that no administrator has approved yet. */
   provisional?: boolean;
+  /** `base_tables`: computed by SQL over base tables joined by approved relationships, with no metric behind it. */
+  source?: 'base_tables';
+  /** The base tables joined, and each join's columns, for a figure from base tables. */
+  join?: { tables: string[]; steps: string[] };
   /**
    * How a provisional metric computes its figure: a sentence of text and columns, or null parts when the formula is
    * beyond what a sentence tells faithfully, so only the expression is shown.

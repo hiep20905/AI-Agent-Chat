@@ -1,3 +1,4 @@
+import logging
 from functools import wraps
 from typing import Any
 
@@ -9,6 +10,8 @@ from superset.exceptions import SupersetSecurityException
 from wtforms import ValidationError
 
 from .exceptions import AdminRequiredError, CsrfTokenError, DatasetAccessError
+
+logger = logging.getLogger(__name__)
 
 
 def is_admin() -> bool:
@@ -30,6 +33,19 @@ def can_access_dataset(dataset: Any) -> bool:
     except SupersetSecurityException:
         return False
     return True
+
+
+def has_row_level_security(dataset: Any) -> bool:
+    """Whether a row-level security rule applies to the signed-in user on this dataset; unreadable counts as yes.
+
+    A rule is tied to its dataset, so SQL written over the table would not apply it: such a table is left out of what
+    the AI Agent may query by SQL.
+    """
+    try:
+        return bool(security_manager.get_rls_filters(dataset))
+    except Exception:
+        logger.warning("Reading the RLS rules of %s failed", getattr(dataset, "table_name", dataset), exc_info=True)
+        return True
 
 
 def require_dataset_access(dataset: Any) -> None:

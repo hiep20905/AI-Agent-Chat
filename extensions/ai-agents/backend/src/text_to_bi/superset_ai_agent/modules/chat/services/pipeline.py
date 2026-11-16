@@ -1,6 +1,7 @@
 import json
 import re
 import time
+from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -11,6 +12,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from ....common.utils.type_formatter import iso_datetime
+from ...schema_link.exceptions import GoalError, NoJoinPathError
+from ...schema_link.services.analysis import link_question
+from ...schema_link.services.answering import base_table_result, dataset_proposal
+from ...schema_link.services.graph import SchemaGraph
 from ...semantic_layer.exceptions import SemanticLayerRefusedError
 from ...semantic_layer.services.catalog import SemanticCatalog
 from ...semantic_layer.services.data_model import DataModelSources
@@ -165,8 +170,13 @@ class MetricBuilder:
     load_sources: Callable[[], DataModelSources]
     # Saves a metric draft; returns the metric in the Semantic Layer's shape and whether it still waits for approval.
     create_metric: Callable[[dict[str, Any]], tuple[dict[str, Any], bool]]
-    # Keeps a dataset drafted over base datasets for an administrator; returns the proposal.
+    # Keeps a dataset drafted over base datasets for an administrator: returns {"proposal": …}, or
+    # {"existing_dataset": …} when a virtual dataset already holds the same query.
     propose_dataset: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+    # Reads the schema graph of one database: the base tables the user may read in full and the approved relationships.
+    load_schema_graph: Callable[[int], dict[str, Any]] | None = None
+    # Runs a read-only SELECT over base tables as the user: columns, rows, row_count, truncated, and SQL for admins.
+    run_sql: Callable[[str], dict[str, Any]] | None = None
 
 
 @dataclass
@@ -521,19 +531,172 @@ def _propose_dataset(
         return step
     body = {**draft.model_dump(exclude={"reason"}), "question": asked}
     try:
-        proposal = yield from _tool_call(
+        kept = yield from _tool_call(
             step, "propose_dataset", {"name": draft.name, "label": draft.label},
-            lambda: builder.propose_dataset(body),
-            lambda value: {key: value.get(key) for key in ("id", "name", "status")},
+            lambda: builder.propose_dataset(body), _kept_shown,
         )
     except SemanticLayerRefusedError as error:
         outcome.query_error = str(error)
         return step + 1
+    proposal = kept.get("proposal") or {}
     outcome.suggestions = {"dataset": {
         "proposal_id": proposal.get("id"), "label": proposal.get("label") or draft.label,
         "description": draft.description, "metric": draft.metric.label,
+        "existing_dataset": (kept.get("existing_dataset") or {}).get("name"),
     }}
     return step + 1
+
+
+def _kept_shown(kept: dict[str, Any]) -> dict[str, Any]:
+    if kept.get("existing_dataset"):
+        return {"existing_dataset": kept["existing_dataset"]}
+    return {key: (kept.get("proposal") or {}).get(key) for key in ("id", "name", "status")}
+
+
+def _base_database(sources: DataModelSources) -> int | None:
+    """The database connection most base datasets live on: schema link reads one connection's tables at a time."""
+    counts = Counter(dataset["database_id"] for dataset in sources.bases if dataset.get("database_id"))
+    return counts.most_common(1)[0][0] if counts else None
+
+
+def _graph_shown(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "tables": len(payload.get("tables", [])), "relationships": len(payload.get("edges", [])),
+        "excluded": [item.get("table") for item in payload.get("excluded", [])],
+    }
+
+
+def _link_shown(trace: dict[str, Any]) -> dict[str, Any]:
+    linking = trace.get("linking", {})
+    path = trace["stages"]["path"]
+    return {
+        "status": trace["status"], "message": trace["message"], "reason": linking.get("draft", {}).get("reason"),
+        "candidates": [
+            {"table": table["table"], "score": table["score"]}
+            for table in linking.get("candidates", {}).get("tables", [])
+        ][:6],
+        "indicators": [item["code"] for item in linking.get("candidates", {}).get("indicators", [])],
+        "goal": linking.get("goal"),
+        "join": {"tables": path.get("tables"), "algorithm": path.get("algorithm")},
+        "sql": trace["sql"],
+    }
+
+
+def _sql_shown(answer: dict[str, Any]) -> dict[str, Any]:
+    return {"row_count": answer.get("row_count"), "truncated": answer.get("truncated"), "rows": answer["rows"][:5]}
+
+
+def _text_filtered(trace: dict[str, Any], graph: SchemaGraph) -> bool:
+    """Whether the goal filters a text column on words, where a spelling the data does not hold finds nothing; a date,
+    a kind of row and an indicator's code are not words a person spells."""
+    return any(
+        isinstance(item.get("value"), str) and item.get("source") != "chỉ số"
+        and not (graph.column(item["dataset_id"], item["column"]) or {}).get("temporal_kind")
+        for item in trace["stages"]["goal"].get("filters", [])
+    )
+
+
+def _offer_dataset(
+    step: int, trace: dict[str, Any], graph: SchemaGraph, asked: str, builder: MetricBuilder, result: dict[str, Any],
+):
+    """Propose the join behind an answer from base tables as a virtual dataset, so the next such question is answered
+    by an approved metric (docs/specs/schema-link.md §8.2). A failure only leaves the proposal out. Returns the step."""
+    if builder.propose_dataset is None:
+        return step
+    try:
+        body = dataset_proposal(trace["linking"]["goal"], graph, asked)
+    except (GoalError, NoJoinPathError):
+        body = None
+    if body is None:
+        return step
+    try:
+        kept = yield from _tool_call(
+            step, "propose_dataset", {"name": body["name"], "label": body["label"]},
+            lambda: builder.propose_dataset(body), _kept_shown,
+        )
+    except SemanticLayerRefusedError:
+        return step + 1
+    if kept.get("existing_dataset"):
+        name = kept["existing_dataset"]["name"]
+        note = f"Dữ liệu này đã có trong dataset “{name}”; quản trị viên chỉ cần thêm chỉ số."
+    else:
+        note = f"Đã đề xuất quản trị viên tạo dataset “{body['label']}” để lần sau trả lời bằng chỉ số đã duyệt."
+    result["notes"] = [*result["notes"], note]
+    result["dataset_proposal"] = kept
+    return step + 1
+
+
+def _answer_from_base_tables(
+    step: int,
+    sources: DataModelSources,
+    asked: str,
+    today: date,
+    model: Any,
+    builder: MetricBuilder,
+    outcome: AgentOutcome,
+):
+    """No aggregate dataset measures it: take the question to SQL over base tables and answer with its rows, as a
+    provisional figure (docs/specs/schema-link.md §5.4). Returns the next step and whether it answered.
+
+    A goal the graph rejects, or SQL the Semantic Layer refuses or fails, goes back to the model with the reason; no
+    row while filtering on words goes back with that; a Semantic Layer that did not answer runs the same SQL again. At
+    most `MAX_QUERY_ATTEMPTS` runs, as for a metric query. A question nothing in the graph holds is not tried again.
+    """
+    if builder.load_schema_graph is None or builder.run_sql is None:
+        return step, False
+    database_id = _base_database(sources)
+    if database_id is None:
+        return step, False
+    payload = yield from _tool_call(
+        step, "load_schema_graph", {"database_id": database_id},
+        lambda: builder.load_schema_graph(database_id), _graph_shown,
+    )
+    step += 1
+    graph = SchemaGraph.from_payload(payload)
+    if not graph.tables:
+        return step, False
+    trace, feedback = None, None
+    for attempt in range(1, MAX_QUERY_ATTEMPTS + 1):
+        if trace is None:
+            trace = yield from _tool_call(
+                step, "link_question", {"question": asked, "attempt": attempt},
+                lambda feedback=feedback: link_question(asked, graph, model, today, feedback), _link_shown,
+            )
+            step += 1
+            if trace["status"] == "not_found":
+                outcome.attempts.append({"attempt": attempt, "kind": "not_found", "detail": trace["message"]})
+                return step, False
+            if trace["status"] != "ok":
+                outcome.attempts.append({"attempt": attempt, "kind": "invalid_plan", "detail": trace["message"]})
+                trace, feedback = None, trace["message"]
+                continue
+        try:
+            answer = yield from _tool_call(
+                step, "run_sql", {"sql": trace["sql"], "attempt": attempt},
+                lambda sql=trace["sql"]: builder.run_sql(sql), _sql_shown,
+            )
+        except SemanticLayerRefusedError as error:
+            step += 1
+            kind = refusal_kind(error)
+            outcome.attempts.append({"attempt": attempt, "kind": kind, "detail": str(error)})
+            if kind == "not_allowed":
+                return step, False
+            if kind == "rejected_query":
+                trace, feedback = None, f"Câu SQL dựng từ lựa chọn trước bị từ chối: {error}"
+            continue
+        step += 1
+        result = base_table_result(trace, answer, graph)
+        if not result["rows"] and _text_filtered(trace, graph) and attempt < MAX_QUERY_ATTEMPTS:
+            outcome.attempts.append({"attempt": attempt, "kind": "value_mismatch", "detail": EMPTY_RESULT_DETAIL})
+            trace = None
+            feedback = "Không có dòng nào khớp; giá trị lọc chữ phải viết đúng như trong `values` của cột ứng viên."
+            continue
+        step = yield from _offer_dataset(step, trace, graph, asked, builder, result)
+        outcome.result = result
+        yield "result", result
+        return step, True
+    return step, False
+
 
 
 def _previous_query(result: dict[str, Any]) -> dict[str, Any] | None:
@@ -723,9 +886,12 @@ def _answer_question(
             step + 1, sources, asked, found, today, model, builder, run_metric, rules, outcome,
         )
         if built_metric is None and sources.bases:
-            step = yield from _propose_dataset(step, sources, asked, found, today, model, builder, outcome)
-    # A metric or dataset proposed to administrators by the steps above already says what is missing.
-    if missing and built_metric is None and not outcome.suggestions:
+            step, answered = yield from _answer_from_base_tables(step, sources, asked, today, model, builder, outcome)
+            if not answered:
+                step = yield from _propose_dataset(step, sources, asked, found, today, model, builder, outcome)
+    # A metric or dataset proposed to administrators by the steps above already says what is missing, and an answer
+    # from base tables already answered.
+    if missing and built_metric is None and outcome.result is None and not outcome.suggestions:
         proposal_context = {
             "question": asked,
             "question_kind": understanding.question_kind,

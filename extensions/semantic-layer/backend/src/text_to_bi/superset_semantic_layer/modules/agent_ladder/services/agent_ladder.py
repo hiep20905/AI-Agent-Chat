@@ -1,6 +1,8 @@
 import hashlib
 import re
 from dataclasses import dataclass
+from datetime import date, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
 
@@ -296,8 +298,48 @@ def derived_column_keys(
     return derived
 
 
+def canonical_sql(sql: str) -> str:
+    """The SQL as one comparable text: parsed and written back compact, plain names unquoted and in lower case, so the
+    same query written with other spacing, quoting, case or line breaks reads the same."""
+    try:
+        tree = sqlglot.parse_one(sql, read="postgres")
+    except SqlglotError:
+        return " ".join(sql.split()).lower()
+    for identifier in tree.find_all(exp.Identifier):
+        if _IDENTIFIER.fullmatch(identifier.name.lower()):
+            identifier.set("this", identifier.name.lower())
+            identifier.set("quoted", False)
+    return tree.sql(dialect="postgres")
+
+
 def sql_fingerprint(sql: str) -> str:
-    return hashlib.sha256(sql.encode("utf-8")).hexdigest()
+    return hashlib.sha256(canonical_sql(sql).encode("utf-8")).hexdigest()
+
+
+def matching_virtual_dataset(sql: str, datasets: list[Any]) -> Any | None:
+    """A virtual dataset already defined by the same query, so the agent reuses it instead of proposing a copy."""
+    wanted = canonical_sql(sql)
+    return next((dataset for dataset in datasets if dataset.sql and canonical_sql(dataset.sql) == wanted), None)
+
+
+# How long one query the AI Agent built may run, and inside the agent's own wait for the answer.
+AGENT_SQL_TIMEOUT_MS = 15_000
+
+
+def agent_query_sql(checked_sql: str, row_cap: int) -> str:
+    """The checked SELECT wrapped so it never returns more than one row past the cap, whatever it says itself."""
+    return f"SELECT * FROM (\n{checked_sql}\n) AS agent_query LIMIT {row_cap + 1}"
+
+
+def json_value(value: Any) -> Any:
+    """A database value as JSON carries it: decimals as numbers, moments as ISO text, binary data left out."""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return None
+    return value
 
 
 def checked_dataset_proposal(body: Any, allowed_datasets: dict[str, Any]) -> dict[str, Any]:

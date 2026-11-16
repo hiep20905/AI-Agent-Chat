@@ -274,6 +274,10 @@ Khi có `result`:
 - `result.provisional` là true: số liệu tính bằng chỉ số hệ thống vừa dựng từ bảng tổng hợp, chưa được quản trị viên
   duyệt; nói rõ đây là số liệu tạm tính và chỉ số đang chờ duyệt, nêu ngắn cách tính theo `metrics[].definition`.
   Cách tính chi tiết đã hiện ngay dưới kết quả, không chép lại công thức.
+- `result.source` là `base_tables` (thay cho quy tắc tạm tính ở trên): chưa có chỉ số được duyệt nào đo điều này, nên
+  số liệu được tính trực tiếp từ dữ liệu gốc, nối các bảng gốc theo quan hệ đã duyệt. Nói rõ đây là số liệu tạm tính
+  từ dữ liệu gốc và nêu ngắn cách tính (phép gộp trên chỉ số hay cột nào); nếu `result.notes` nói đã đề xuất tạo
+  dataset hoặc dữ liệu đã có trong dataset, nhắc một câu ngắn.
 - `result.doubt` là `empty` (không có dòng nào khớp) hoặc `zero` (mọi giá trị bằng 0): rất có thể công thức tạm tính
   lọc sai giá trị nên chưa phản ánh đúng dữ liệu. Không khẳng định "không có" hay "bằng 0"; nói kết quả tạm tính chưa
   đáng tin, mời người dùng xem cách tính bên dưới và cho biết đã chuyển quản trị viên kiểm tra.
@@ -298,7 +302,8 @@ Khi không có `result`:
   `suggestions` nếu có.
 - Nếu có `suggestions.dataset`: chưa có bảng tổng hợp nào đo được điều đó; hệ thống đã soạn đề xuất một bảng dữ liệu
   mới (`label`) cùng chỉ số `metric` từ dữ liệu gốc và gửi quản trị viên duyệt; khi được duyệt sẽ trả lời được câu
-  hỏi này. Không nêu số liệu.
+  hỏi này. Có `existing_dataset` thì dữ liệu đã có sẵn trong dataset đó, quản trị viên chỉ cần thêm chỉ số. Không nêu
+  số liệu.
 Viết một đến hai đoạn ngắn. Không liệt kê các bước xử lý, không dùng nhãn kỹ thuật như "expert rule", "glossary",
 "metric", "định tính", "định lượng", không nêu tên cột kỹ thuật. Không bịa số liệu ngoài `result`.
 {DATA_NOTICE}"""

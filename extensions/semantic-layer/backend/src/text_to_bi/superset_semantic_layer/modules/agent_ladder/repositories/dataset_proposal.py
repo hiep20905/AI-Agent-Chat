@@ -16,6 +16,17 @@ class DatasetProposalRepository(BaseRepository[DatasetProposal]):
             .first()
         )
 
+    def kept_with_fingerprint(self, sql_fingerprint: str) -> DatasetProposal | None:
+        """A proposal of the same SQL still waiting for review or already made into a dataset, newest first."""
+        return (
+            self.query()
+            .filter(
+                DatasetProposal.sql_fingerprint == sql_fingerprint, DatasetProposal.status.in_(("pending", "created")),
+            )
+            .order_by(DatasetProposal.created_on.desc())
+            .first()
+        )
+
     def pending_count(self) -> int:
         return self.query().filter(DatasetProposal.status == "pending").count()
 

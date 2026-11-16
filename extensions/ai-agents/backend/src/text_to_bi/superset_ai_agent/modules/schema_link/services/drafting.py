@@ -73,18 +73,24 @@ class GoalDraft(BaseModel):
     reason: str = ""
 
 
-def draft_input(question: str, candidates: dict[str, Any], today: date) -> str:
-    return "\n\n".join((
+def draft_input(question: str, candidates: dict[str, Any], today: date, feedback: str | None = None) -> str:
+    blocks = [
         f"today: {iso_datetime(today)}",
         f"Câu hỏi: {question}",
         f"Ứng viên:\n```json\n{json.dumps(candidates, ensure_ascii=False, indent=1, default=str)}\n```",
-    ))
+    ]
+    if feedback:
+        blocks.append(f"Lần chọn trước không dùng được, sửa lại cho đúng: {feedback}")
+    return "\n\n".join(blocks)
 
 
-def draft_goal(question: str, candidates: dict[str, Any], today: date, model: Any) -> GoalDraft:
-    """One model call that turns the question into a goal, choosing among the ranked candidates only."""
+def draft_goal(
+    question: str, candidates: dict[str, Any], today: date, model: Any, feedback: str | None = None,
+) -> GoalDraft:
+    """One model call that turns the question into a goal, choosing among the ranked candidates only; `feedback` says
+    why the goal drafted before could not be used, when this is another try."""
     return model.with_structured_output(GoalDraft).invoke(
-        [("system", LINK_GOAL), ("human", draft_input(question, candidates, today))]
+        [("system", LINK_GOAL), ("human", draft_input(question, candidates, today, feedback))]
     )
 
 

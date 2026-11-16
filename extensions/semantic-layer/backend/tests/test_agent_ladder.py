@@ -1,16 +1,23 @@
+from datetime import date, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 
 from text_to_bi.superset_semantic_layer.modules.agent_ladder.services.agent_ladder import (
     DerivedColumnKeys,
+    agent_query_sql,
+    canonical_sql,
     checked_dataset_proposal,
     checked_dataset_sql,
     checked_metric_draft,
     derived_column_keys,
+    json_value,
     matching_metric,
+    matching_virtual_dataset,
     source_columns,
     source_metric,
+    sql_fingerprint,
     unique_metric_name,
 )
 from text_to_bi.superset_semantic_layer.modules.semantic_query.services.members import (
@@ -196,3 +203,33 @@ def test_a_proposed_dataset_keeps_the_keys_of_the_base_columns_it_reads_and_refe
 def test_a_query_that_can_repeat_or_merge_rows_keeps_the_reference_but_not_the_primary_key(sql):
     keys = derived_column_keys(sql, [OBSERVATIONS, CITIES], KEY_ENTRIES)
     assert keys["quan_sat_id"] == DerivedColumnKeys(is_pk=False, is_unique=False, referenced=(7, "quan_sat_id"))
+
+
+def test_the_same_query_written_with_other_spacing_quoting_or_case_is_one_fingerprint():
+    written = 'SELECT "t0"."ten_thanh_pho" AS "ten_thanh_pho"\nFROM "public"."dm_thanh_pho" AS t0\nLIMIT 10'
+    rewritten = "select t0.TEN_THANH_PHO as ten_thanh_pho from public.dm_thanh_pho as t0 limit 10"
+
+    assert canonical_sql(written) == canonical_sql(rewritten)
+    assert sql_fingerprint(written) == sql_fingerprint(rewritten)
+    assert sql_fingerprint(written) != sql_fingerprint(rewritten.replace("limit 10", "limit 20"))
+
+
+def test_a_virtual_dataset_with_the_same_query_is_found_and_a_physical_table_never_is():
+    sql = "SELECT t0.ten_thanh_pho FROM public.dm_thanh_pho AS t0"
+    physical = SimpleNamespace(id=1, sql=None)
+    other = SimpleNamespace(id=2, sql="SELECT vung FROM public.dm_thanh_pho")
+    same = SimpleNamespace(id=3, sql='SELECT "t0"."ten_thanh_pho"\nFROM "public"."dm_thanh_pho" AS "t0"')
+
+    assert matching_virtual_dataset(sql, [physical, other, same]) is same
+    assert matching_virtual_dataset(sql, [physical, other]) is None
+
+
+def test_the_agents_query_never_returns_more_than_one_row_past_the_cap():
+    assert agent_query_sql("SELECT 1 AS one", 1000) == "SELECT * FROM (\nSELECT 1 AS one\n) AS agent_query LIMIT 1001"
+
+
+def test_database_values_are_carried_as_json_carries_them():
+    assert json_value(Decimal("28.76")) == 28.76
+    assert json_value(datetime(2026, 11, 12, 9, 30)) == "2026-11-12T09:30:00"
+    assert json_value(date(2026, 11, 12)) == "2026-11-12"
+    assert (json_value(b"x"), json_value("Ha Noi"), json_value(3)) == (None, "Ha Noi", 3)
