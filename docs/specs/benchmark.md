@@ -48,6 +48,9 @@ Cần stack đang chạy; `SUPERSET_PORT` hoặc `SUPERSET_URL` khi Superset kh�
 3. chấm điểm từ trajectory: nhãn và ý định từ kết quả bước `classify_question`; metric và nguồn từ bảng kết quả (`done`,
    kể cả `parts` của câu con); con số từ các dòng kết quả.
 
+`--taxonomy` chỉ đo bước phân loại trên 53 câu gán nhãn của `docs/specs/taxonomy-cau-hoi.md` §10, qua endpoint chỉ
+cho quản trị viên `POST /chat/classify` (một lần gọi model mỗi câu, không ghi log), và so với ngưỡng ở §11 của spec đó.
+
 Kết quả ghi vào `extensions/ai-agents/benchmark/runs/<thời điểm>/` (không đưa vào git): `trajectories.jsonl` (mọi sự
 kiện của mọi lượt hỏi), `results.json` (điểm từng câu) và `report.md` (bảng tổng hợp).
 

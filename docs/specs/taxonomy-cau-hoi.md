@@ -299,7 +299,9 @@ Mỗi dòng có các trường `id`, `question`, `history` (nếu có, danh sác
 4. **Đã làm.** Chạy câu con song song (mỗi câu một thread) hoặc tuần tự theo `depends_on`, ghép kết quả trong
    `FINAL_ANSWER`; sự kiện `part_result` và giao diện cho câu con.
 5. **Đã làm.** Kiểm tra PII lớp 2 (mục 4.1).
-6. Ghi log các nhãn; đo độ chính xác trên bộ câu ví dụ.
+6. **Đã làm.** Ghi log các nhãn (cột `triage`). Đo độ chính xác trên đủ bộ câu ví dụ bằng
+   `uv run scripts/benchmark.py --taxonomy`: mỗi câu (kèm lịch sử của nó) qua `POST /chat/classify`, chỉ cho quản trị
+   viên, một lần gọi model, không ghi log; báo cáo so với ngưỡng ở mục 11.
 
 ## 13. Câu hỏi cần chốt
 
