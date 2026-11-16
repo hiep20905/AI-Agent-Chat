@@ -24,6 +24,7 @@ from ...semantic_layer.services.metrics import catalog_metric
 from ..exceptions import QueryPlanError
 from . import prompts
 from .formula import answers_anything, doubtful_result, told_formula
+from .intents import shaped_plan
 from .query import combined_result, plan_query, result_for_answer
 from .repair import (
     MAX_QUERY_ATTEMPTS,
@@ -185,6 +186,8 @@ class MetricBuilder:
 class AgentOutcome:
     # How the question was classified before anything was looked up (docs/specs/taxonomy-cau-hoi.md).
     triage: dict[str, Any] | None = None
+    # The kind of question answered here (the classifier's intent of its sub-question), which shapes its metric query.
+    intent: str | None = None
     rewritten_question: str | None = None
     glossary_terms: list[dict[str, Any]] = field(default_factory=list)
     # Business concepts the question uses that no approved term, metric or rule defines; only these make a term missing.
@@ -880,6 +883,7 @@ def _answer_question(
         _today_block(today),
         f"Lịch sử hội thoại:\n{_conversation(history)}",
         f"Câu hỏi mới nhất: {question}",
+        *([f"Loại câu hỏi: {outcome.intent}"] if outcome.intent else []),
         _data_block("Thuật ngữ đã duyệt", _described(catalog.glossary_terms, TERM_FIELDS)),
         _data_block("Metric đã duyệt, khớp câu hỏi nhất trước", _described(metrics, (*METRIC_FIELDS, "match"))),
         _data_block("Expert rule đã duyệt", _described(catalog.expert_rules, RULE_FIELDS)),
@@ -1097,6 +1101,9 @@ def _query_with_repair(
 ):
     """Run the plan; when it fails or finds nothing, find out why and mend it, for at most `MAX_QUERY_ATTEMPTS` runs.
 
+    Each plan is first put in the form its kind of question needs (`shaped_plan`): a trend split by time, a ranking
+    ordered; one that cannot answer that kind of question is an invalid plan.
+
     The kinds of failure are those of docs/specs/xu-ly-loi-truy-van.md. A text filter the data does not spell that way
     is respelled from the values the column holds ("Huế" is "Hue"), without the model; a plan the checks or Superset
     reject goes back to the model with the reason; a Semantic Layer that did not answer is asked again. What trying
@@ -1108,9 +1115,11 @@ def _query_with_repair(
     for attempt in range(1, MAX_QUERY_ATTEMPTS + 1):
         planned = None
         try:
+            plan, shaped = shaped_plan(plan, outcome.intent, catalog.datasets, catalog.metrics)
             planned = plan_query(plan, catalog.datasets, catalog.metrics, rules)
+            arguments = {"plan": plan, "expert_rule_ids": rule_ids, "attempt": attempt}
             result = yield from _tool_call(
-                step, "query_metrics", {"plan": plan, "expert_rule_ids": rule_ids, "attempt": attempt},
+                step, "query_metrics", {**arguments, "shaped": shaped} if shaped else arguments,
                 lambda planned=planned: _run_metrics(planned, run_metric), _query_shown,
             )
             step += 1
@@ -1268,7 +1277,7 @@ def _concurrently(runs: list[Iterator[Event]]):
 
 def _answer_part(sub_question: SubQuestion, text: str, answer: Callable[[str, AgentOutcome], Any]):
     """Answer one sub-question; a failure is kept with it, so the other sub-questions still get answered."""
-    part = AgentOutcome()
+    part = AgentOutcome(intent=sub_question.intent)
     try:
         context = yield from _in_part(sub_question.id, answer(text, part))
     except Exception as error:  # noqa: BLE001
@@ -1409,6 +1418,7 @@ def run_agent(
         context = {"today": iso_datetime(today), "question": question, "parts": parts}
     else:
         understood_question = triage.sub_questions[0].text if triage.sub_questions else question
+        outcome.intent = triage.sub_questions[0].intent if triage.sub_questions else None
         # A follow-up builds on what the turn before queried; a new question starts afresh.
         earlier = previous if triage.follow_up != "new" else ()
         answered = yield from _answer_question(

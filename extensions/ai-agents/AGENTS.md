@@ -104,7 +104,13 @@ numbers, and logs the question so administrators can fill the gaps:
    queried) and finds up to three questions answered before with an approved
    metric that share at least half their words with it (the FAQ, from the
    question log); both go into the prompt and into the step's `retrieved`
-   argument (docs/specs/truy-hoi-metric-va-faq.md).
+   argument (docs/specs/truy-hoi-metric-va-faq.md). The sub-question's intent
+   goes into the prompt too, and `chat/services/intents.py` checks each plan's
+   form against it before it runs: a trend not split by time gets the metric's
+   time column, a ranking with no order is ordered by its first metric, and a
+   ranking, list or breakdown with no grouping, or a comparison with nothing to
+   compare, goes back to the model as an invalid plan (`shaped` argument of
+   `query_metrics`; docs/specs/taxonomy-cau-hoi.md §5.1).
    The call rewrites a follow-up into a standalone question;
    picks the glossary terms, metrics, expert rules and the user's own
    definitions the question is

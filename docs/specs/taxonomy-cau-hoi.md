@@ -119,6 +119,25 @@ Không đưa vào:
 
 Cột "Kế hoạch truy vấn" là đầu vào cho việc nghiên cứu cách xử lý từng ý định trong bước lập kế hoạch truy vấn.
 
+### 5.1 Xử lý theo ý định (đã làm 16/11/2026)
+
+Ý định của câu con đi theo câu con đó tới bước `understand_question` (dòng "Loại câu hỏi" trong prompt, kèm hình dạng
+truy vấn của từng ý định như cột "Kế hoạch truy vấn"). Sau khi model lập kế hoạch, `chat/services/intents.py`
+(`shaped_plan`) kiểm lại hình dạng trước mỗi lần chạy, kể cả kế hoạch đã sửa:
+
+| Ý định | Kế hoạch thiếu | Xử lý |
+| --- | --- | --- |
+| `trend` | Không chia theo thời gian, không so hai kỳ | Thêm cột thời gian của metric (`query_defaults.time_column`, hoặc cột ngày duy nhất của dataset) vào đầu `dimensions`; `presentation` thành `line`. Không có cột thời gian thì là `invalid_plan` |
+| `ranking` | Không có `dimensions` | `invalid_plan`: model được nhờ nhóm theo đối tượng được xếp |
+| `ranking` | Không có `order_by` | Xếp theo metric đầu, cao xuống thấp |
+| `list`, `breakdown` | Không có `dimensions` | `invalid_plan`; `breakdown` đang là `number` thì thành `bar` |
+| `comparison` | Không `comparison`, không chiều, chỉ một metric | `invalid_plan`: không có gì để so |
+
+Phần tự thêm được ghi vào đối số `shaped` của bước `query_metrics`, nên trajectory thấy được. `invalid_plan` đi vào vòng
+sửa của `docs/specs/xu-ly-loi-truy-van.md` như mọi kế hoạch không qua kiểm tra. Các ý định còn lại (`value`, `range`,
+`anomaly`, `correlation`, `diagnostic`, `forecast`) chỉ có hướng dẫn trong prompt, không bị nắn: một câu `value` đếm số
+ngày thoả điều kiện vẫn được nhóm theo ngày.
+
 ## 6. Trục 3: Cấu trúc câu hỏi và cách tách
 
 | Mã | Khi nào | Ví dụ | Thực thi |

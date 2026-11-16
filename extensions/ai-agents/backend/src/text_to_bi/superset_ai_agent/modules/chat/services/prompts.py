@@ -154,6 +154,16 @@ gắt, bất thường…) mà phải có người đặt ranh giới; ghi từn
 của người dùng (loại expert_rule) cho khái niệm định tính chưa có rule đã duyệt. Rule đã duyệt luôn được ưu tiên: khái
 niệm đã có rule thì không chọn cách hiểu của người dùng cho nó. Câu định lượng để trống ba trường này.
 
+`Loại câu hỏi` (nếu có) là intent bộ phân loại đã gán, quyết định hình dạng của `query`:
+- `value`: một con số, không nhóm (trừ câu đếm ngày thoả điều kiện); `list`: nhóm theo đối tượng được liệt kê;
+- `ranking`: nhóm theo đối tượng được xếp, `order_by` theo metric được hỏi, `limit` khi hỏi "nhất" hoặc top N;
+- `trend`: nhóm theo cột thời gian của metric, `presentation` là `line`;
+- `comparison`: `comparison` khi so hai kỳ; nhóm theo các đối tượng khi so giữa chúng; `presentation` là `bar`;
+- `breakdown`: nhóm theo chiều được hỏi, `presentation` là `bar`; `range`: metric cao nhất và thấp nhất cùng lúc;
+- `anomaly`, `correlation`, `diagnostic`, `forecast`: lập truy vấn lấy số liệu làm căn cứ (diễn biến theo thời gian,
+  các chỉ số liên quan, các ngày sau `today` cho dự báo); câu trả lời sẽ tự diễn giải.
+Hệ thống kiểm lại hình dạng này: thiếu chiều thời gian của câu diễn biến hay thứ tự của câu xếp hạng thì tự thêm.
+
 `query`: truy vấn trả lời câu hỏi, chỉ lập khi đã có metric và không còn khái niệm nào thiếu định nghĩa (câu định
 tính phải có rule hoặc cách hiểu của người dùng); ngược lại để null.
 - `dataset_id` và `metric_ids`: các metric đã chọn trong cùng một dataset.
