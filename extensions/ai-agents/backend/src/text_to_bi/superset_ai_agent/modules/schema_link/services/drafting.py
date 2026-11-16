@@ -21,6 +21,8 @@ LINK_GOAL = """Bạn chọn dữ liệu để trả lời một câu hỏi trên
   - Đếm số bản ghi ("bao nhiêu lần", "số lần nạp", "số quan sát hiện tại"): `aggregation` là `COUNT`, `column` null,
     `dataset_id` là bảng mà mỗi dòng là một thứ được đếm (bảng quan sát cho "số quan sát"). Một cột `measure` trùng tên
     (ví dụ số quan sát ghi trong mỗi lần nạp) chỉ dùng khi câu hỏi nói về chính bảng chứa cột đó.
+- Cột có `contains_pii` chứa dữ liệu cá nhân: chỉ đếm được, không đưa vào `group_by` hay `filters`. Câu hỏi muốn
+  xem giá trị của từng người thì `found` là false.
 - `group_by`: "theo giờ, ngày, tuần, tháng" là cột có `role` `time` của bảng mang thời gian, kèm `time_grain`; "theo
   thành phố, vùng…" là cột `label` hoặc `dimension` (ưu tiên `label`, không dùng cột khoá).
 - `filters`: giá trị chữ viết đúng như trong `values` của cột (dữ liệu có thể không dấu: "Ha Noi" cho Hà Nội); không

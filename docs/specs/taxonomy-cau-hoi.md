@@ -69,8 +69,12 @@ tiếp, vừa nhiều ý, vừa có ý xếp hạng.
 PII được kiểm tra **hai lớp**:
 
 1. **Lớp câu chữ** (bước phân loại): câu hỏi nhắm vào thông tin cá nhân của một người.
-2. **Lớp dữ liệu** (sau `understand_question`): metric, chiều hay bộ lọc được chọn chạm vào cột hoặc dataset có
-   `contains_pii` trong `/semantic-catalog` (commit `9b71851`). Cách xử lý ở lớp này còn chờ chốt (mục 13).
+2. **Lớp dữ liệu** (đã làm 16/11/2026): cột có `contains_pii` trong Data Dictionary chỉ dùng được trong số tổng hợp
+   (đếm, trung bình…), không nhóm hay lọc theo giá trị của từng người. Ở đường metric, `plan_query` từ chối chiều
+   hoặc bộ lọc trên cột đó (`invalid_plan`, model được nhờ bỏ đi); ở đường dữ liệu gốc, `resolve_goal` từ chối
+   `group_by` hoặc `filters` trên cột đó. Giá trị của cột cá nhân không bao giờ vào prompt: `/schema-graph` không gửi
+   `values` của cột đó, catalog của AI Agent bỏ `labelled_values` của khoá cá nhân. Đây là phương án giữa của câu hỏi
+   ở mục 13, chờ xác nhận.
 
 ### 4.2 Ranh giới với bước hiểu câu hỏi
 
@@ -294,13 +298,13 @@ Mỗi dòng có các trường `id`, `question`, `history` (nếu có, danh sác
    câu con được hiểu theo câu con đó.
 4. **Đã làm.** Chạy câu con song song (mỗi câu một thread) hoặc tuần tự theo `depends_on`, ghép kết quả trong
    `FINAL_ANSWER`; sự kiện `part_result` và giao diện cho câu con.
-5. Kiểm tra PII lớp 2.
+5. **Đã làm.** Kiểm tra PII lớp 2 (mục 4.1).
 6. Ghi log các nhãn; đo độ chính xác trên bộ câu ví dụ.
 
 ## 13. Câu hỏi cần chốt
 
 1. **PII lớp 2**: chặn hẳn câu hỏi chạm vào cột hoặc dataset `contains_pii`, hay cho phép số tổng hợp (đếm, trung
-   bình) nhưng không hiện giá trị từng dòng?
+   bình) nhưng không hiện giá trị từng dòng? Đang làm theo cách thứ hai (mục 4.1), chờ xác nhận.
 2. **`metadata`**: trả lời ngay từ catalog (đề xuất, đang làm theo cách này), hay vẫn đưa vào luồng hiện có?
 3. **Số câu con tối đa**: 4 có đủ không?
 4. **`diagnostic` và `correlation`**: làm trong đợt này, hay tạm trả lời bằng phần số liệu (`comparison`,

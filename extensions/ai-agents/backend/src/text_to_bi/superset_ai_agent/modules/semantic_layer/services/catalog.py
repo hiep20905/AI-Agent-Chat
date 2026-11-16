@@ -55,15 +55,23 @@ def rule_filters(rule: dict[str, Any]) -> list[dict[str, Any]] | None:
 
 
 def dataset_entry(dataset: dict[str, Any], members: dict[str, Any]) -> dict[str, Any]:
-    """A dataset as the query planner reads it: columns, labelled key values and the date range of the data."""
+    """A dataset as the query planner reads it: columns, labelled key values and the date range of the data.
+
+    A column marked as personal data keeps `contains_pii`, and its labelled values are left out, so no person's name
+    reaches the prompt.
+    """
+    personal = {column["name"] for column in dataset.get("dimensions", []) if column.get("contains_pii")}
     return {
         "id": dataset["id"],
         "name": dataset.get("name"),
         "columns": [
             {
-                key: column.get(key)
-                for key in ("name", "label", "type", "temporal", "groupby", "filterable")
-                if column.get(key) not in (None, "")
+                **{
+                    key: column.get(key)
+                    for key in ("name", "label", "type", "temporal", "groupby", "filterable")
+                    if column.get(key) not in (None, "")
+                },
+                **({"contains_pii": True} if column["name"] in personal else {}),
             }
             for column in dataset.get("dimensions", [])
         ],
@@ -74,6 +82,7 @@ def dataset_entry(dataset: dict[str, Any], members: dict[str, Any]) -> dict[str,
                 "values": [{"value": member["value"], "label": member["label"]} for member in item.get("members", [])],
             }
             for item in members.get("dimensions", [])
+            if item["key_column"] not in personal
         ],
         # The first and last date of each date column, so a question outside them is known to have no data.
         "time_ranges": members.get("time_ranges", []),

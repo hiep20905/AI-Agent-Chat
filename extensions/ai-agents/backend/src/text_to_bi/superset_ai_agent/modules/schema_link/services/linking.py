@@ -231,7 +231,8 @@ def _column_view(column: dict[str, Any], hit: Hit | None, named: list[Any]) -> d
     view = {
         "name": column["name"], "label": column.get("label"), "role": column.get("role"), "unit": column.get("unit"),
         "aggregations": column.get("aggregations") or None, "temporal_kind": column.get("temporal_kind"),
-        "values": values or None,
+        "values": None if column.get("contains_pii") else values or None,
+        "contains_pii": column.get("contains_pii") or None,
     }
     if hit is not None:
         view["score"], view["matched"] = hit.score, hit.matched

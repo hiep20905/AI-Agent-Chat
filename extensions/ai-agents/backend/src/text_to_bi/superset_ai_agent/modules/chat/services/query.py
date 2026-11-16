@@ -143,6 +143,8 @@ def _checked_filter(
     column = columns.get(item.get("column"))
     if column is None or not column.get("filterable"):
         raise QueryPlanError(f"Không lọc được theo cột “{item.get('column')}”.")
+    if column.get("contains_pii"):
+        raise QueryPlanError(f"Cột “{column['name']}” chứa dữ liệu cá nhân: chỉ dùng được trong số tổng hợp (đếm, trung bình…), không nhóm hay lọc theo giá trị của từng người.")
     operator = item.get("operator")
     if operator not in OPERATORS:
         raise QueryPlanError(f"Phép so sánh “{operator}” không được hỗ trợ.")
@@ -311,6 +313,8 @@ def plan_query(
         column = columns.get(name)
         if column is None or not column.get("groupby"):
             raise QueryPlanError(f"Không nhóm được theo cột “{name}”.")
+        if column.get("contains_pii"):
+            raise QueryPlanError(f"Cột “{name}” chứa dữ liệu cá nhân: chỉ dùng được trong số tổng hợp (đếm, trung bình…), không nhóm hay lọc theo giá trị của từng người.")
         dimension = {"name": name, "label": column.get("label") or name, "temporal": bool(column.get("temporal"))}
         if name in value_labels:
             # A key is shown by its labels, so it is named like them: "Thành phố" rather than "Khóa thành phố".

@@ -8,6 +8,8 @@ QUERY_RULES = """\
   cột ngày; hỏi "thành phố nào" thì nhóm theo cột khoá thành phố. Hỏi một con số tổng thì để rỗng.
   Hỏi "bao nhiêu ngày", "mấy ngày" thoả một điều kiện: nhóm theo cột ngày, đưa điều kiện vào `filters` và chọn metric
   của chính đại lượng trong điều kiện; số ngày là số dòng kết quả.
+- Cột có `contains_pii` chứa dữ liệu cá nhân: không đưa vào `dimensions` hay `filters`, chỉ dùng trong số tổng hợp.
+  Câu hỏi muốn xem giá trị của từng người thì để `query` null.
 - `filters`: mỗi bộ lọc có `column` (đúng tên cột có `filterable`), `operator` (==, !=, <, <=, >, >=, IN, NOT IN),
   `value` và `source`:
   - `time`: mốc thời gian trên cột ngày, giá trị dạng "YYYY-MM-DD", tính từ `today`. "Hôm nay" là `today`; "tuần này"
