@@ -14,7 +14,7 @@ from ....common.utils.type_formatter import sse_event
 from ....core.chat_models import get_chat_model
 from ....core.config import BUSINESS_TIMEZONE
 from ....core.database import handle_errors, rollback_on_error
-from ....core.security import csrf_protected
+from ....core.security import csrf_protected, is_admin
 from ....migrations import ensure_agent_tables
 from ...definitions.services.definitions import definitions_for_agent
 from ...semantic_layer.services.catalog import cached_semantic_catalog
@@ -27,6 +27,7 @@ from ...semantic_layer.services.data_model import (
 from ...semantic_layer.services.metrics import create_agent_metric, run_metric_query
 from ...sessions.services.sessions import require_own_session, start_session, touch_session
 from ...superset.services.dashboards import dashboard_titles, require_dashboard_access
+from ..exceptions import ClassifyAdminRequiredError, ClassifyRequestError
 from ..services.conversation import (
     answered_examples,
     asked_question,
@@ -36,7 +37,7 @@ from ..services.conversation import (
     record_tool_call,
     session_history,
 )
-from ..services.pipeline import AgentOutcome, MetricBuilder, run_agent
+from ..services.pipeline import AgentOutcome, MetricBuilder, classify_question, recent_history, run_agent
 
 logger = logging.getLogger(__name__)
 FAILED_ANSWER_MESSAGE = "AI Agent không hoàn tất được câu trả lời."
@@ -67,6 +68,33 @@ def _data_table_labels(user_id: int, cookie_header: str) -> list[str]:
 class TextToBIAgentAPI(RestApi):
     openapi_spec_tag = "Superset AI Agent"
     class_permission_name = "text_to_bi_chat_api"
+
+    @expose("/classify", methods=("POST",))
+    @protect()
+    @safe
+    @permission_name("write")
+    @csrf_protected
+    @handle_errors
+    def classify(self):
+        """The classifier alone on one question and the turns before it (`history` of `{question, answer}`), for the
+        administrator to measure it on labelled questions (scripts/benchmark.py --taxonomy). Nothing is logged."""
+        if not is_admin():
+            raise ClassifyAdminRequiredError()
+        body = request.get_json(silent=True) or {}
+        question, turns = body.get("question"), body.get("history") or []
+        if not isinstance(question, str) or not question.strip() or not isinstance(turns, list) or any(
+            not isinstance(turn, dict) or not isinstance(turn.get("question"), str) for turn in turns
+        ):
+            raise ClassifyRequestError()
+        history = recent_history([
+            message
+            for turn in turns
+            for message in ({"role": "user", "content": turn["question"]},
+                            {"role": "assistant", "content": turn.get("answer") or ""})
+        ])
+        dashboard = body.get("dashboard") if isinstance(body.get("dashboard"), str) else None
+        triage = classify_question(question.strip(), history, get_chat_model(), dashboard)
+        return self.response(200, **triage.model_dump())
 
     @expose("/stream", methods=("POST",))
     @protect()

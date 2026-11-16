@@ -19,8 +19,8 @@ NEEDS_TWO_SIDES = (
 NO_TIME_COLUMN = "Câu hỏi diễn biến cần chia theo thời gian, nhưng metric không có cột thời gian nhóm được."
 NEEDS_TWO_METRICS = "Câu hỏi tương quan cần hai metric trong `metric_ids`, đo trên cùng các ngày hoặc cùng các nhóm."
 NEEDS_CONTRAST = (
-    "Câu hỏi vì sao cần số liệu để đối chiếu: `comparison` với kỳ trước, hoặc chia theo nhóm trong `dimensions` để thấy "
-    "phần nào thay đổi."
+    "Câu hỏi vì sao cần số liệu để đối chiếu: `comparison` với kỳ trước, hoặc chia theo nhóm trong `dimensions` để "
+    "thấy phần nào thay đổi."
 )
 
 

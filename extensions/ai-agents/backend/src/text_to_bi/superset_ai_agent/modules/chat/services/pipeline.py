@@ -39,7 +39,7 @@ from .repair import (
     spelled_as_stored,
     text_filters,
 )
-from .retrieval import listed_metrics, similar_examples
+from .retrieval import curated_examples, listed_metrics, similar_examples
 from .triage import TRIAGE_STATUSES, QuestionTriage, SubQuestion, blocked_reply, checked_triage
 
 MAX_HISTORY_TURNS = 3
@@ -764,6 +764,7 @@ def answered_example(question: str, metrics: list[dict[str, Any]], query_result:
         return None
     return {
         "question": question,
+        "source": "câu đã trả lời",
         "metrics": [{key: item.get(key) for key in ("dataset_id", "metric_id", "name")} for item in metrics],
         "dimensions": query["dimensions"],
         "filters": [item for item in query["filters"] if item.get("source") != "time"],
@@ -882,14 +883,17 @@ def _answer_question(
     kept_keys = [(item["dataset_id"], metric_id) for item in previous for metric_id in item["metric_ids"]]
     metrics = listed_metrics(question, catalog.metrics, catalog.glossary_terms, kept_keys)
     listed_datasets = {metric["dataset_id"] for metric in metrics}
-    examples = similar_examples(question, answered, set(metrics_by_key))
+    faq = [*curated_examples(catalog.expert_rules, catalog.metrics), *answered]
+    examples = similar_examples(question, faq, set(metrics_by_key))
     understanding_input = "\n\n".join((
         _today_block(today),
         f"Lịch sử hội thoại:\n{_conversation(history)}",
         f"Câu hỏi mới nhất: {question}",
         *([f"Loại câu hỏi: {outcome.intent}"] if outcome.intent else []),
         _data_block("Thuật ngữ đã duyệt", _described(catalog.glossary_terms, TERM_FIELDS)),
-        _data_block("Metric đã duyệt, khớp câu hỏi nhất trước", _described(metrics, (*METRIC_FIELDS, "match"))),
+        _data_block(
+            "Metric đã duyệt, khớp câu hỏi nhất trước", _described(metrics, (*METRIC_FIELDS, "match", "confident")),
+        ),
         _data_block("Expert rule đã duyệt", _described(catalog.expert_rules, RULE_FIELDS)),
         _data_block("Cách hiểu người dùng đã xác nhận", _described(list(user_definitions), USER_DEFINITION_FIELDS)),
         _data_block(
@@ -901,7 +905,11 @@ def _answer_question(
     retrieved = {
         "metrics_listed": len(metrics),
         "best_metrics": [{"name": item["name"], "match": item["match"]} for item in metrics[:3] if item.get("match")],
-        "examples": [{"question": item["question"], "similarity": item["similarity"]} for item in examples],
+        "selected": next((item["name"] for item in metrics if item.get("confident")), None),
+        "examples": [
+            {"question": item["question"], "similarity": item["similarity"], "source": item.get("source")}
+            for item in examples
+        ],
     }
     understanding = yield from _tool_call(
         first_step, "understand_question",
@@ -1389,6 +1397,20 @@ def _answer_parts(triage: QuestionTriage, answer: Callable[[str, AgentOutcome], 
     return [contexts[part_id] for part_id in order]
 
 
+def classify_question(
+    question: str,
+    history: list[dict[str, str]],
+    model: Any,
+    dashboard: str | None = None,
+    previous: Sequence[dict[str, Any]] = (),
+    data_tables: Sequence[str] = (),
+) -> QuestionTriage:
+    """The classifier's labels for one question (docs/specs/taxonomy-cau-hoi.md §8), made consistent; the first step
+    of `run_agent`, also run alone to measure the classifier on the labelled sample questions."""
+    triage_input = _triage_input(question, history, dashboard, previous, data_tables)
+    return checked_triage(_ask(model, QuestionTriage, prompts.CLASSIFY_QUESTION, triage_input))
+
+
 def run_agent(
     question: str,
     history: list[dict[str, str]],
@@ -1413,10 +1435,9 @@ def run_agent(
     today = today or date.today()
     outcome = AgentOutcome()
 
-    triage_input = _triage_input(question, history, dashboard, previous, data_tables)
     triage = yield from _tool_call(
         1, "classify_question", {"question": question, "history_turns": len(history) // 2},
-        lambda: checked_triage(_ask(model, QuestionTriage, prompts.CLASSIFY_QUESTION, triage_input)),
+        lambda: classify_question(question, history, model, dashboard, previous, data_tables),
         lambda value: value.model_dump(),
     )
     outcome.triage = triage.model_dump()

@@ -1,4 +1,4 @@
-from ...common.exceptions import NotFoundError, ValidationError
+from ...common.exceptions import NotAuthorizedError, NotFoundError, ValidationError
 
 
 class QueryPlanError(ValidationError):
@@ -23,3 +23,11 @@ class DashboardRequiredError(ValidationError):
 
 class ChatSessionIdError(ValidationError):
     message = "Cuộc trò chuyện không hợp lệ."
+
+
+class ClassifyAdminRequiredError(NotAuthorizedError):
+    message = "Chỉ quản trị viên được chạy riêng bước phân loại câu hỏi."
+
+
+class ClassifyRequestError(ValidationError):
+    message = "Cần `question` (chuỗi không rỗng) và `history` là danh sách `{question, answer}`."

@@ -72,8 +72,17 @@ def ranked_metrics(
         if named:
             score += PHRASE_WEIGHT * max(len(phrase.split()) for phrase in named)
         matched = [f"“{phrase}”" for phrase in named] or ([f"từ: {', '.join(shared)}"] if shared else [])
-        ranked.append((-round(score, 2), order, {"metric": metric, "score": round(score, 2), "matched": matched}))
-    return [item for *_key, item in sorted(ranked, key=lambda entry: entry[:2])]
+        named_words_count = max((len(phrase.split()) for phrase in named), default=0)
+        ranked.append((-round(score, 2), order, {
+            "metric": metric, "score": round(score, 2), "matched": matched, "named_words": named_words_count,
+        }))
+    ordered = [item for *_key, item in sorted(ranked, key=lambda entry: entry[:2])]
+    # The question names this metric whole and no other as fully: retrieval can pick it without the model's help.
+    if ordered and ordered[0]["named_words"] and all(
+        item["named_words"] < ordered[0]["named_words"] for item in ordered[1:]
+    ):
+        ordered[0]["confident"] = True
+    return ordered
 
 
 def listed_metrics(
@@ -97,8 +106,34 @@ def listed_metrics(
             or (item["metric"]["dataset_id"], item["metric"]["metric_id"]) in kept
         ]
     return [
-        {**item["metric"], **({"match": item["matched"]} if item["score"] > 0 else {})}
+        {
+            **item["metric"],
+            **({"match": item["matched"]} if item["score"] > 0 else {}),
+            **({"confident": True} if item.get("confident") else {}),
+        }
         for item in ranked
+    ]
+
+
+def curated_examples(expert_rules: Sequence[dict[str, Any]], metrics: Sequence[dict[str, Any]]) -> list[dict]:
+    """The example questions administrators wrote on approved expert rules, as FAQ entries with the rule's metrics;
+    they come before questions answered by the agent, so an administrator's example wins a tie."""
+    names = {(metric["dataset_id"], metric["metric_id"]): metric["name"] for metric in metrics}
+    return [
+        {
+            "question": question,
+            "metrics": [
+                {"dataset_id": rule["dataset_id"], "metric_id": metric_id,
+                 "name": names.get((rule["dataset_id"], metric_id))}
+                for metric_id in rule["metric_ids"]
+            ],
+            "expert_rule": rule["name"],
+            "source": "quản trị viên soạn",
+        }
+        for rule in expert_rules
+        if rule.get("metric_ids") and rule.get("dataset_id") is not None
+        for question in rule.get("example_questions") or []
+        if isinstance(question, str) and question.strip()
     ]
 
 

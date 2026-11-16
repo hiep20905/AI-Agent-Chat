@@ -36,10 +36,20 @@ metric), và danh sách dataset chỉ còn các dataset của những metric đ�
 Prompt nói rõ `match` chỉ là gợi ý: chọn theo nghĩa, và metric chỉ chung một phần tên mà đo thứ khác thì không chọn, để
 `metrics` rỗng cho ladder đi xuống dữ liệu gốc.
 
+**Chọn ngay.** Khi câu hỏi gọi đúng nguyên tên (hoặc mã, tên thuật ngữ, từ đồng nghĩa) của một metric và không metric
+nào khác khớp nguyên cụm dài bằng, bước truy hồi chọn luôn metric đó: nó mang `confident` trong danh sách, tên nó nằm ở
+`retrieved.selected` của bước `understand_question`, và prompt bảo model chọn nó trừ khi câu hỏi rõ ràng hỏi thứ khác.
+"Nhiệt độ cao nhất ở Hà Nội" chọn ngay "Nhiệt độ cao nhất"; "nhiệt độ ở Huế" hay "gió giật" không chọn metric nào.
+
 ### 2.2. Câu hỏi đã trả lời (FAQ, `similar_examples`)
 
-Nguồn là log câu hỏi (`text_to_bi_agent_question`): 300 câu gần nhất có trạng thái `resolved`, không lỗi, có
-`query_result`. Mỗi câu thành một ví dụ: câu hỏi (bản viết lại nếu có), metric, chiều và bộ lọc không phải thời gian.
+Hai nguồn, theo thứ tự ưu tiên:
+
+1. **Câu hỏi mẫu quản trị viên soạn** (`curated_examples`): các câu ví dụ trên expert rule đã duyệt (mục "Ví dụ" của
+   rule trong Semantic Layer), kèm metric và tên của rule, `source` là "quản trị viên soạn". Khi một câu mẫu và một
+   câu đã trả lời giống câu hỏi như nhau, câu mẫu được giữ.
+2. **Câu đã trả lời** trong log câu hỏi (`text_to_bi_agent_question`), `source` là "câu đã trả lời": 300 câu gần nhất
+   có trạng thái `resolved`, không lỗi, có `query_result`. Mỗi câu thành một ví dụ: câu hỏi (bản viết lại nếu có), metric, chiều và bộ lọc không phải thời gian.
 Khoảng thời gian và các dòng kết quả bị bỏ, vì câu mới luôn tự tính lại thời gian từ `today`.
 
 Một ví dụ được dùng khi:

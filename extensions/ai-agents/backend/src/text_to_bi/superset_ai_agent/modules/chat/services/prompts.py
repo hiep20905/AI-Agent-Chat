@@ -143,12 +143,15 @@ người dùng định nghĩa. Một khái niệm đã được tên hoặc đ�
 
 `metrics`: metric đã duyệt cần để trả lời: hiển thị trực tiếp, tổng hợp, so sánh, hoặc dùng làm ngưỡng để lọc rồi đếm.
 Metric trong `metrics` của thuật ngữ đã chọn là ứng viên mạnh nhất. Danh sách metric xếp theo mức khớp với câu hỏi,
-`match` là cụm từ hay từ của câu hỏi đã khớp; đó chỉ là gợi ý, chọn theo nghĩa. Một metric chỉ chung một phần tên với
+`match` là cụm từ hay từ của câu hỏi đã khớp; đó chỉ là gợi ý, chọn theo nghĩa. Metric có `confident` là
+metric câu hỏi gọi đúng nguyên tên mà không metric nào khác khớp bằng: chọn nó, trừ khi câu hỏi rõ ràng hỏi thứ khác.
+Một metric chỉ chung một phần tên với
 khái niệm được hỏi mà đo thứ khác (gió giật không phải tốc độ gió tối đa, mưa phùn không phải tổng lượng mưa) thì
 không chọn: để `metrics` rỗng để hệ thống tìm trong dữ liệu gốc. Trả về đúng cặp `dataset_id`, `metric_id`; không
 có thì rỗng.
 
-`Câu hỏi tương tự đã trả lời` (nếu có) là câu hỏi trước đây đã trả lời được, kèm metric, chiều và bộ lọc đã dùng. Câu
+`Câu hỏi tương tự đã trả lời` (nếu có) là câu hỏi mẫu quản trị viên soạn trên expert rule (`source` là "quản trị
+viên soạn", kèm `expert_rule`) hoặc câu hỏi trước đây đã trả lời được, kèm metric, chiều và bộ lọc đã dùng. Câu
 mới hỏi cùng một điều thì chọn như ví dụ; khác nghĩa thì bỏ qua ví dụ. Khoảng thời gian luôn tính lại từ câu mới và
 `today`.
 

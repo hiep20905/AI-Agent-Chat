@@ -5,6 +5,7 @@ from test_agent_pipeline import DATASET, FakeModel, FakeSemanticLayer, _answers
 from text_to_bi.superset_ai_agent.modules.chat.services import pipeline
 from text_to_bi.superset_ai_agent.modules.chat.services.retrieval import (
     MAX_LISTED_METRICS,
+    curated_examples,
     listed_metrics,
     ranked_metrics,
     similar_examples,
@@ -114,6 +115,7 @@ def test_an_answered_example_keeps_its_metrics_and_filters_but_not_its_period_or
 
     assert example == {
         "question": "Tổng lượng mưa ở Cần Thơ tuần này",
+        "source": "câu đã trả lời",
         "metrics": [{"dataset_id": 12, "metric_id": 20, "name": "Tổng lượng mưa"}],
         "dimensions": ["ngay"],
         "filters": [{"column": "thanh_pho_key", "operator": "==", "value": "7", "source": "place"}],
@@ -140,4 +142,35 @@ def test_the_understanding_step_sees_the_ranked_metrics_and_the_closest_answered
     assert "Câu hỏi tương tự đã trả lời" in prompt and "Nhiệt độ cao nhất ở Hà Nội tuần này" in prompt
     started = next(data for name, data in events if name == "tool_start" and data["name"] == "understand_question")
     assert started["arguments"]["retrieved"]["examples"] == [{"question": "Nhiệt độ cao nhất ở Hà Nội tuần này",
-                                                          "similarity": 1.0}]
+                                                          "similarity": 1.0, "source": None}]
+    assert started["arguments"]["retrieved"]["selected"] == "Nhiệt độ cao nhất"
+
+
+def test_a_metric_named_whole_and_longer_than_any_other_match_is_picked_by_retrieval():
+    listed = listed_metrics("Nhiệt độ cao nhất ở Hà Nội hôm qua", WEATHER_METRICS)
+
+    assert listed[0]["name"] == "Nhiệt độ cao nhất" and listed[0]["confident"] is True
+    assert not any(item.get("confident") for item in listed[1:])
+
+
+def test_no_metric_is_picked_when_none_is_named_whole():
+    assert not any(item.get("confident") for item in listed_metrics("Gió giật ở Đà Nẵng hôm nay", WEATHER_METRICS))
+    assert not any(item.get("confident") for item in listed_metrics("Nhiệt độ ở Huế", WEATHER_METRICS))
+
+
+def test_an_administrators_example_on_an_expert_rule_is_an_faq_entry_and_wins_a_tie():
+    rules = [{"id": 1, "name": "Ngày mưa lớn", "dataset_id": 12, "metric_ids": [20],
+              "example_questions": ["Tuần này Cần Thơ có ngày mưa lớn nào không?"]},
+             {"id": 2, "name": "Không ví dụ", "dataset_id": 12, "metric_ids": [20], "example_questions": []}]
+    curated = curated_examples(rules, WEATHER_METRICS)
+    answered = [{"question": "Tuần trước Cần Thơ có ngày mưa lớn nào không?", "metrics": RAIN,
+                 "source": "câu đã trả lời"}]
+
+    examples = similar_examples("Tháng này Cần Thơ có ngày mưa lớn nào không?", [*curated, *answered], {(12, 20)})
+
+    assert curated == [{
+        "question": "Tuần này Cần Thơ có ngày mưa lớn nào không?",
+        "metrics": [{"dataset_id": 12, "metric_id": 20, "name": "Tổng lượng mưa"}],
+        "expert_rule": "Ngày mưa lớn", "source": "quản trị viên soạn",
+    }]
+    assert [item["source"] for item in examples] == ["quản trị viên soạn"]
