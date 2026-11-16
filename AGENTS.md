@@ -138,6 +138,7 @@ from the repository root with `uv run`; `--help` prints its options.
 | `scripts/compat.py` | Checks the source against the real Superset 6.1 runtime: flags a stale host or deployed bundle, then compiles every backend module with the container's Python 3.10 and imports it inside a Superset app context. |
 | `scripts/smoke.py` | Logs in through the Superset login form as the admin and calls the read-only Semantic Layer endpoints, expecting 200 with JSON. It changes no data. |
 | `scripts/logs.py` | Prints Superset log lines about the extension, the Semantic Layer, and errors. `--since 10m`, `--follow`, and `--all` adjust it. |
+| `scripts/benchmark.py` | AI Agent benchmark: asks `extensions/ai-agents/benchmark/questions.jsonl` through the chat API, scores each answer against its reference SQL on the warehouse, and writes trajectories and a report under `extensions/ai-agents/benchmark/runs/` (`docs/specs/benchmark.md`). `--only` and `--workers` adjust it. |
 
 Typical loop after changing Semantic Layer code:
 

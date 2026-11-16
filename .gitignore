@@ -43,3 +43,6 @@ node_modules/
 !.gitkeep
 !.npmrc
 !.env.example
+
+# AI Agent benchmark runs (trajectories hold full answers; the findings go to docs/specs/benchmark.md)
+/extensions/ai-agents/benchmark/runs/
