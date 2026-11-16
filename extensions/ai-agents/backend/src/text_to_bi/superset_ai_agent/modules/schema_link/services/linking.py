@@ -265,6 +265,12 @@ def candidates_view(candidates: Candidates, graph: SchemaGraph) -> dict[str, Any
             "reaches": sorted(
                 (_reachable(graph, item["dataset_id"], REACH_DEPTH) & candidate_ids) - {item["dataset_id"]}
             ) or None,
+            # The candidate tables with many rows for each of this one's, which it may filter by (read through EXISTS)
+            # but not group by.
+            "has_many": sorted(
+                other for other in candidate_ids - {item["dataset_id"]}
+                if item["dataset_id"] in _reachable(graph, other, REACH_DEPTH)
+            ) or None,
             "columns": columns,
         })
     return {

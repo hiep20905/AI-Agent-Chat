@@ -203,3 +203,11 @@ def test_tables_columns_and_stored_values_name_a_concept_but_unrelated_words_do_
     assert names_in_schema("lần nạp dữ liệu", GRAPH)
     assert names_in_schema("thành phố", GRAPH)
     assert not names_in_schema("giá vàng", GRAPH)
+
+
+def test_a_table_is_told_which_candidates_have_many_rows_for_each_of_its_rows():
+    view = candidates_view(rank("Bao nhiêu thành phố có quan sát hiện tại hôm nay?", GRAPH), GRAPH)
+
+    cities = next(table for table in view["tables"] if table["dataset_id"] == CITIES)
+    observations = next(table for table in view["tables"] if table["dataset_id"] == OBSERVATIONS)
+    assert OBSERVATIONS in cities["has_many"] and CITIES in observations["reaches"]

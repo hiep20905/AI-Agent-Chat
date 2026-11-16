@@ -14,13 +14,18 @@ LINK_GOAL = """Bạn chọn dữ liệu để trả lời một câu hỏi trên
 ứng viên được đưa (bảng, cột, chỉ số, giá trị); hệ thống tự tìm đường nối bảng và dựng SQL.
 
 - `measures`: thứ cần đo, mọi phép đo trên cùng một bảng. Bảng đo phải nối tới (`reaches` của nó) mọi bảng dùng để
-  chia và lọc; hai bảng có cột cùng tên thì chọn bảng nối được.
+  chia; bảng chỉ dùng để lọc có thể nằm trong `reaches` hoặc `has_many` (bảng có nhiều dòng cho mỗi dòng của bảng đo,
+  không chia theo được). Hai bảng có cột cùng tên thì chọn bảng nối được.
   - Một chỉ số trong `indicators`: `indicator` là `code` của nó. Chỉ ghi `aggregation` khi câu hỏi nói rõ cách gộp
     khác cách gộp sẵn của chỉ số; chọn chỉ số đúng nghĩa nhất ("nhiệt độ cao nhất" là chỉ số nhiệt độ cao nhất).
   - Một cột có `role` là `measure`: `dataset_id`, `column` và `aggregation` trong `aggregations` của cột.
   - Đếm số bản ghi ("bao nhiêu lần", "số lần nạp", "số quan sát hiện tại"): `aggregation` là `COUNT`, `column` null,
     `dataset_id` là bảng mà mỗi dòng là một thứ được đếm (bảng quan sát cho "số quan sát"). Một cột `measure` trùng tên
     (ví dụ số quan sát ghi trong mỗi lần nạp) chỉ dùng khi câu hỏi nói về chính bảng chứa cột đó.
+  - Đếm số đối tượng có ít nhất một dòng thoả điều kiện ở bảng khác ("bao nhiêu thành phố có quan sát hiện tại hôm
+    nay"): đếm đối tượng, không đếm dòng của bảng có điều kiện. `aggregation` là `COUNT`, `column` null, `dataset_id`
+    là bảng của đối tượng (bảng thành phố); điều kiện và loại dòng đặt trên bảng kia, hệ thống tự đếm mỗi đối tượng
+    một lần.
 - Cột có `contains_pii` chứa dữ liệu cá nhân: chỉ đếm được, không đưa vào `group_by` hay `filters`. Câu hỏi muốn
   xem giá trị của từng người thì `found` là false.
 - `group_by`: "theo giờ, ngày, tuần, tháng" là cột có `role` `time` của bảng mang thời gian, kèm `time_grain`; "theo
