@@ -5,6 +5,7 @@ from catalog_source import api_class, compile_into
 
 from text_to_bi.superset_semantic_layer.modules.semantic_query.services.schema_graph import (
     GRAPH_VERSION,
+    column_node,
     graph_edges,
     table_node,
 )
@@ -226,3 +227,14 @@ def test_unreadable_rls_rules_count_as_a_rule(monkeypatch):
     assert security.has_row_level_security(SimpleNamespace(table_name="dm_thanh_pho")) is True
     monkeypatch.setattr(security, "security_manager", SimpleNamespace(get_rls_filters=lambda dataset: []))
     assert security.has_row_level_security(SimpleNamespace(table_name="dm_thanh_pho")) is False
+
+
+
+def test_a_personal_data_column_is_marked_and_shows_no_stored_value():
+    live = SimpleNamespace(column_name="ho_ten", verbose_name=None, type="TEXT")
+    entry = SimpleNamespace(display_name="Họ tên", semantic_role="label", contains_pii=True)
+
+    node = column_node(live, entry, ["Nguyen Van A", "Tran Thi B"])
+
+    assert node["contains_pii"] is True and node["values"] == []
+    assert column_node(live, None, ["Ha Noi"])["contains_pii"] is False

@@ -6,11 +6,17 @@ GRAPH_VERSION = 1
 
 
 def column_node(live: Any, entry: Any | None, values: list[str] | None) -> dict[str, Any]:
-    """A column as schema link sees it; a column the dictionary has not seeded yet carries only its live facts."""
+    """A column as schema link sees it; a column the dictionary has not seeded yet carries only its live facts.
+
+    A column marked as personal data (`contains_pii`) never shows its stored values, so no person's name or number
+    reaches the agent's prompt.
+    """
     name = str(live.column_name)
 
     def field(attribute: str, default: Any = None) -> Any:
         return getattr(entry, attribute, default) if entry is not None else default
+
+    personal = bool(field("contains_pii", False))
 
     return {
         "name": name,
@@ -25,7 +31,8 @@ def column_node(live: Any, entry: Any | None, values: list[str] | None) -> dict[
         "is_pk": bool(field("is_pk", False)),
         "is_unique": bool(field("is_unique", False)),
         "is_fk": bool(field("is_fk", False)),
-        "values": values or [],
+        "contains_pii": personal,
+        "values": [] if personal else values or [],
     }
 
 
@@ -54,6 +61,7 @@ def table_node(
         "label": getattr(dictionary, "display_name", None) or dataset.table_name,
         "description": getattr(dictionary, "description", None) or getattr(dataset, "description", None),
         "grain_description": getattr(dictionary, "grain", None),
+        "contains_pii": bool(getattr(dictionary, "contains_pii", False)),
         "layer": {"id": layer.id, "name": layer.name, "level": layer.level} if layer is not None else None,
         "time": {
             "column": getattr(dictionary, "time_column", None),
