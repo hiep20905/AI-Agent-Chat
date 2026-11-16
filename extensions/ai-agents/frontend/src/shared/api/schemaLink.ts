@@ -34,6 +34,7 @@ export type GoalStage = StageBase & {
   filters?: Array<Located & { operator: string; value: unknown; source: string }>;
   row_kinds?: Array<Located & { value: string; grain: string }>;
   limit?: number;
+  order?: 'desc' | 'asc' | null;
 };
 
 export type NodesStage = StageBase & { root?: number; terminals?: number[]; reasons?: Record<string, string[]> };

@@ -41,6 +41,16 @@ logger = logging.getLogger(__name__)
 FAILED_ANSWER_MESSAGE = "AI Agent không hoàn tất được câu trả lời."
 
 
+def _data_table_labels(user_id: int, cookie_header: str) -> list[str]:
+    """The names of the datasets the asker may query, so the classifier knows the data beyond the dashboard's title;
+    an unreadable Semantic Layer leaves the title alone."""
+    try:
+        sources = cached_data_model_sources(user_id, cookie_header)
+    except AgentError:
+        return []
+    return [dataset.get("label") or dataset["name"] for dataset in [*sources.aggregates, *sources.bases]]
+
+
 @api(
     id="text_to_bi_chat_api",
     name="Superset AI Agent API",
@@ -84,6 +94,7 @@ class TextToBIAgentAPI(RestApi):
         user_definitions = definitions_for_agent(user_id, dashboard_id)
         # The dashboard's title tells the question classifier what the data is about.
         dashboard_title = dashboard_titles({dashboard_id}).get(dashboard_id)
+        data_tables = _data_table_labels(user_id, request.headers.get("Cookie", ""))
         # The Semantic Layer is read and its metrics run as this user, so forward their session and CSRF token.
         cookie_header = request.headers.get("Cookie", "")
         csrf_token = request.headers.get("X-CSRFToken", "")
@@ -114,6 +125,7 @@ class TextToBIAgentAPI(RestApi):
                     ),
                     dashboard=dashboard_title,
                     previous=previous,
+                    data_tables=data_tables,
                 )
                 while True:
                     try:

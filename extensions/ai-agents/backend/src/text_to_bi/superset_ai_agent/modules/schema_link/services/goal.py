@@ -57,6 +57,8 @@ class Goal:
     filters: list[Filter] = field(default_factory=list)
     row_kinds: list[RowKind] = field(default_factory=list)
     limit: int = DEFAULT_LIMIT
+    # Rank the groups by the first measure, highest first (`desc`) or lowest first (`asc`); None keeps group order.
+    order: str | None = None
 
     @property
     def root(self) -> int:
@@ -198,7 +200,10 @@ def resolve_goal(raw: dict[str, Any], graph: SchemaGraph) -> Goal:
     limit = raw.get("limit", DEFAULT_LIMIT)
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= MAX_LIMIT:
         raise GoalError(f"limit phải từ 1 đến {MAX_LIMIT}.")
-    return Goal(measures, group_by, filters, row_kinds, limit)
+    order = raw.get("order")
+    if order not in (None, "desc", "asc"):
+        raise GoalError("order chỉ là desc (cao nhất trước) hoặc asc (thấp nhất trước).")
+    return Goal(measures, group_by, filters, row_kinds, limit, order)
 
 
 def grain_problems(goal: Goal, tables: list[int], graph: SchemaGraph) -> list[dict[str, Any]]:

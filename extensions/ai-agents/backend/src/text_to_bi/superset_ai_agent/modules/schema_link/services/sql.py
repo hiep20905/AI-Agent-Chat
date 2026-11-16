@@ -53,6 +53,7 @@ def build_sql(goal: Goal, tree: JoinTree, graph: SchemaGraph) -> str:
 
     taken: set[str] = set()
     groups = []
+    measured: list[str] = []
     for item in goal.group_by:
         expression = column(item.table, item.column)
         if item.time_grain:
@@ -69,7 +70,8 @@ def build_sql(goal: Goal, tree: JoinTree, graph: SchemaGraph) -> str:
         else:
             aggregated = _AGGREGATES[measure.aggregation](this=column(measure.table, measure.column))
         name = (measure.indicator or {}).get("code") or f"{measure.aggregation.lower()}_{measure.column or 'dong'}"
-        query = query.select(exp.alias_(aggregated, _alias(name, taken), quoted=True))
+        measured.append(_alias(name, taken))
+        query = query.select(exp.alias_(aggregated, measured[-1], quoted=True))
 
     conditions = []
     for item in goal.filters:
@@ -83,6 +85,11 @@ def build_sql(goal: Goal, tree: JoinTree, graph: SchemaGraph) -> str:
         query = query.where(exp.and_(*conditions))
     if groups:
         query = query.group_by(*[expression.copy() for expression in groups])
+    if groups and goal.order:
+        # A ranking ("nhiều nhất", "top 3"): the first measure decides, the groups only break ties.
+        ranked = exp.Ordered(this=exp.column(measured[0], quoted=True), desc=goal.order == "desc")
+        query = query.order_by(ranked, *[expression.copy() for expression in groups])
+    elif groups:
         query = query.order_by(*[expression.copy() for expression in groups])
     return query.limit(goal.limit).sql(dialect=dialect, pretty=True)
 

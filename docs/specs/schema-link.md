@@ -229,7 +229,8 @@ ngày 26/10/2026). Chặng nào chưa chạy tới (dừng vì thiếu dữ li�
 do.
 
 1. **Mục tiêu.** Câu hỏi được hiểu thành đo gì (chỉ số hoặc cột đo, phép gộp), chia theo gì, lọc theo gì, loại dòng
-   nào. Mỗi mục ghi nguồn: khớp nhãn, từ đồng nghĩa, giá trị mã, tên chỉ số hoặc model chọn.
+   nào, và với câu xếp hạng ("nhiều nhất", "top 3") thì `order` (`desc`/`asc` theo phép đo đầu) cùng `limit`. Mỗi mục
+   ghi nguồn: khớp nhãn, từ đồng nghĩa, giá trị mã, tên chỉ số hoặc model chọn.
 2. **Node.** Các bảng và cột ứng viên kèm điểm khớp. Terminal (bảng phải có trong truy vấn) và bảng gốc được đánh dấu.
 3. **Đồ thị.** Toàn bộ đồ thị schema người hỏi được thấy: base table xếp theo tầng (Danh mục, Nghiệp vụ), cạnh đã duyệt
    kèm bản số. Bảng không liên quan để mờ, terminal tô đậm.
@@ -254,7 +255,10 @@ trả về cả tầng dữ liệu của từng bảng.
    Python thuần, test trên đồ thị của kho mẫu và các đồ thị tự dựng: nhiều đường, nhân dòng, không có đường.
 5. **AI Agent: linking (5.1).** Đã làm 13/11/2026: `linking.py` xếp hạng ứng viên không dùng model, `drafting.py` một
    lần gọi model chọn trong ứng viên; trang thử nhận câu hỏi tự nhiên và hiện ứng viên kèm điểm.
-6. **AI Agent: chạy và trả lời (5.4)**, gắn vào ladder thay cho đề xuất dataset.
+6. **AI Agent: chạy và trả lời (5.4)**, gắn vào ladder thay cho đề xuất dataset. Đã làm 16/11/2026: ladder đi tiếp
+   xuống base table cả khi câu hỏi còn thiếu thuật ngữ mà dữ liệu gốc gọi đúng tên (một bảng, cột, chỉ số hay giá trị),
+   chạy SQL qua `/agent-sql`, sửa tối đa ba lần, rồi đề xuất dataset tái dùng. Ba câu của mục 7 đã chạy thật trên kho
+   mẫu.
 7. **AI Agent: hiển thị quá trình linking trên trang AI Agent (5.5).**
 8. **Nghiệm thu** bằng các câu hỏi chỉ base table trả lời được (mục 7).
 

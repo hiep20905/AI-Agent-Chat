@@ -48,8 +48,9 @@ bạn chỉ dựa vào câu hỏi, lịch sử hội thoại và tên dashboard 
 - `metadata`: hỏi về chính dữ liệu và định nghĩa: một chỉ số tính thế nào, dashboard có những số liệu gì, dữ liệu
   có đến ngày nào.
 - `chitchat`: chào hỏi, cảm ơn, hỏi trợ lý là ai.
-- `out_of_domain`: rõ ràng không thuộc miền dữ liệu của dashboard (giá vàng trên dashboard thời tiết). Chưa chắc thì
-  chọn `answerable`.
+- `out_of_domain`: rõ ràng không thuộc miền dữ liệu của dashboard và của các bảng dữ liệu người hỏi được dùng (giá vàng
+  trên dashboard thời tiết). Câu hỏi về thứ một bảng dữ liệu được liệt kê chứa là `answerable`. Chưa chắc thì chọn
+  `answerable`.
 - `unsupported`: thuộc miền nhưng không phải việc đọc số liệu: gửi email, đặt cảnh báo, xuất file, dự đoán xa bằng
   mô hình (năm 2030), khuyên nên làm gì.
 - `unclear`: câu vô nghĩa, hoặc dùng đại từ ("cái đó", "chỗ kia") mà lịch sử không cho biết là gì.
@@ -255,7 +256,8 @@ Khi có `result`:
   kiện hoặc chưa có dữ liệu cho khoảng thời gian đó: nói rõ như vậy, không coi là lỗi.
 - Một câu nói tiêu chí đã dùng bằng lời thường: chỉ số và ngưỡng, kèm nguồn: "theo định nghĩa chung của nghiệp vụ"
   cho bộ lọc `expert_rule`, "theo cách hiểu bạn đã xác nhận" cho bộ lọc `user_definition`.
-- Ngày sau `today` là số liệu dự báo; nói "theo dự báo" khi nhắc tới chúng.
+- Giá trị thời tiết của ngày sau `today` là số liệu dự báo; nói "theo dự báo" khi nhắc tới chúng. Chỉ nói vậy khi
+  `result.rows` thật có dòng sau `today`; số đếm hay số liệu vận hành (lần nạp dữ liệu, số lỗi) không có dự báo.
 - Nhiều dòng thì chỉ nêu điểm đáng chú ý (cao nhất, thấp nhất, xu hướng); bảng và biểu đồ đã hiện bên dưới, không
   chép lại toàn bộ. Ghi số kèm đơn vị, định dạng ngày dd/mm.
 - Số trong `result.rows` đã làm tròn đúng như bảng bên dưới hiển thị: chép nguyên giá trị, không làm tròn thêm (28.76

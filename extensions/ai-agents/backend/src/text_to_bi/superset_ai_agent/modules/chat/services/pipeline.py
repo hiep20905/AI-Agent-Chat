@@ -16,6 +16,7 @@ from ...schema_link.exceptions import GoalError, NoJoinPathError
 from ...schema_link.services.analysis import link_question
 from ...schema_link.services.answering import base_table_result, dataset_proposal
 from ...schema_link.services.graph import SchemaGraph
+from ...schema_link.services.linking import names_in_schema
 from ...semantic_layer.exceptions import SemanticLayerRefusedError
 from ...semantic_layer.services.catalog import SemanticCatalog
 from ...semantic_layer.services.data_model import DataModelSources
@@ -634,9 +635,13 @@ def _answer_from_base_tables(
     model: Any,
     builder: MetricBuilder,
     outcome: AgentOutcome,
+    concepts: Sequence[str] = (),
 ):
     """No aggregate dataset measures it: take the question to SQL over base tables and answer with its rows, as a
     provisional figure (docs/specs/schema-link.md §5.4). Returns the next step and whether it answered.
+
+    `concepts` are the business concepts no approved term defines; the base tables answer only when their data names
+    every one of them (a column, an indicator or a stored value), else the user is asked as before.
 
     A goal the graph rejects, or SQL the Semantic Layer refuses or fails, goes back to the model with the reason; no
     row while filtering on words goes back with that; a Semantic Layer that did not answer runs the same SQL again. At
@@ -653,7 +658,7 @@ def _answer_from_base_tables(
     )
     step += 1
     graph = SchemaGraph.from_payload(payload)
-    if not graph.tables:
+    if not graph.tables or not all(names_in_schema(concept, graph) for concept in concepts):
         return step, False
     trace, feedback = None, None
     for attempt in range(1, MAX_QUERY_ATTEMPTS + 1):
@@ -689,7 +694,11 @@ def _answer_from_base_tables(
         if not result["rows"] and _text_filtered(trace, graph) and attempt < MAX_QUERY_ATTEMPTS:
             outcome.attempts.append({"attempt": attempt, "kind": "value_mismatch", "detail": EMPTY_RESULT_DETAIL})
             trace = None
-            feedback = "Không có dòng nào khớp; giá trị lọc chữ phải viết đúng như trong `values` của cột ứng viên."
+            feedback = (
+                "Không có dòng nào khớp: giá trị lọc chữ phải viết đúng như trong `values` của cột ứng viên, và loại "
+                "dòng đã chọn có thể không có dữ liệu cho chỉ số này (thử loại dòng khác, ví dụ dòng theo giờ gom bằng "
+                "`time_grain`)."
+            )
             continue
         step = yield from _offer_dataset(step, trace, graph, asked, builder, result)
         outcome.result = result
@@ -745,8 +754,12 @@ def _conversation(history: list[dict[str, str]]) -> str:
 
 def _triage_input(
     question: str, history: list[dict[str, str]], dashboard: str | None, previous: Sequence[dict[str, Any]] = (),
+    data_tables: Sequence[str] = (),
 ) -> str:
-    blocks = [f"Dashboard: {dashboard or '(không rõ tên)'}", f"Lịch sử hội thoại:\n{_conversation(history)}"]
+    blocks = [f"Dashboard: {dashboard or '(không rõ tên)'}"]
+    if data_tables:
+        blocks.append(f"Bảng dữ liệu người hỏi được dùng: {', '.join(data_tables)}")
+    blocks.append(f"Lịch sử hội thoại:\n{_conversation(history)}")
     if previous:
         # What the last turn asked about, so a follow-up is rewritten with its exact scope and figures.
         blocks.append(_data_block("Phạm vi lượt trước", [
@@ -874,7 +887,11 @@ def _answer_question(
     used_definitions = [definitions_by_id[item["id"]] for item in outcome.user_definitions]
     rules = chosen_rules + _stored_conditions(used_definitions)
     built_metric = None
-    if missing == ["metric"] and builder is not None and run_metric is not None:
+    # Only a missing metric climbs the data model; a missing term too may be answered from base tables when the data
+    # names it (an indicator "Ap suat" for "áp suất"), while a missing expert rule always goes back to the user first.
+    reads_base_tables = builder is not None and builder.load_schema_graph is not None and builder.run_sql is not None
+    climbs = missing == ["metric"] or (missing == ["glossary", "metric"] and reads_base_tables)
+    if climbs and builder is not None and run_metric is not None:
         found = {
             # A term's columns tell the metric draft which column the concept lives in.
             "glossary_terms": _described(chosen_terms, ("name", "definition", "columns", "dataset_ids")),
@@ -882,12 +899,16 @@ def _answer_question(
             "user_definitions": _described(used_definitions, ("name", "definition", "conditions")),
         }
         sources = yield from _tool_call(step, "load_data_model", {}, builder.load_sources, DataModelSources.summary)
-        step, built_metric = yield from _build_metric(
-            step + 1, sources, asked, found, today, model, builder, run_metric, rules, outcome,
-        )
+        step += 1
+        if missing == ["metric"]:
+            step, built_metric = yield from _build_metric(
+                step, sources, asked, found, today, model, builder, run_metric, rules, outcome,
+            )
         if built_metric is None and sources.bases:
-            step, answered = yield from _answer_from_base_tables(step, sources, asked, today, model, builder, outcome)
-            if not answered:
+            step, answered = yield from _answer_from_base_tables(
+                step, sources, asked, today, model, builder, outcome, outcome.undefined_concepts,
+            )
+            if not answered and missing == ["metric"]:
                 step = yield from _propose_dataset(step, sources, asked, found, today, model, builder, outcome)
     # A metric or dataset proposed to administrators by the steps above already says what is missing, and an answer
     # from base tables already answered.
@@ -1303,6 +1324,7 @@ def run_agent(
     builder: MetricBuilder | None = None,
     dashboard: str | None = None,
     previous: Sequence[dict[str, Any]] = (),
+    data_tables: Sequence[str] = (),
 ) -> Iterator[Event]:
     """Run one question asked on the dashboard titled `dashboard`; `user_definitions` are what the user confirmed there.
 
@@ -1313,7 +1335,7 @@ def run_agent(
     today = today or date.today()
     outcome = AgentOutcome()
 
-    triage_input = _triage_input(question, history, dashboard, previous)
+    triage_input = _triage_input(question, history, dashboard, previous, data_tables)
     triage = yield from _tool_call(
         1, "classify_question", {"question": question, "history_turns": len(history) // 2},
         lambda: checked_triage(_ask(model, QuestionTriage, prompts.CLASSIFY_QUESTION, triage_input)),

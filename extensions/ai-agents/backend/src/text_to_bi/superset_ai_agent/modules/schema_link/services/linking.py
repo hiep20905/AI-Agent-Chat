@@ -201,6 +201,18 @@ def rank(question: str, graph: SchemaGraph, entries: list[Entry] | None = None) 
     return Candidates(tables, columns, indicators, values)
 
 
+def names_in_schema(concept: str, graph: SchemaGraph) -> bool:
+    """Whether the data names a concept whole: a table's or column's label or synonym, an indicator's name, or a
+    stored value ("lần nạp dữ liệu" is a table, "thất bại" a stored status)."""
+    entries = build_index(graph)
+    normalized = normalized_text(concept)
+    return any(
+        any(_named(phrase, normalized) or _named(normalized, phrase) for phrase in entry.phrases)
+        or any(_named(normalized_text(value), normalized) for value in entry.values if len(normalized_text(value)) >= 3)
+        for entry in entries
+    )
+
+
 def _column_role(graph: SchemaGraph, hit: Hit) -> str | None:
     return (graph.column(hit.entry.table, hit.entry.column) or {}).get("role")
 

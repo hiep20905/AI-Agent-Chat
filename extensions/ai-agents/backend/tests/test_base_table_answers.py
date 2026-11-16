@@ -237,3 +237,35 @@ def test_a_question_nothing_in_the_graph_holds_is_not_tried_again():
     # Then, as before schema link, the dataset draft and the metric asked of administrators.
     assert _steps(events)[5:] == ["link_question", "draft_dataset", "propose_missing_items"]
     assert [attempt["kind"] for attempt in outcome.attempts] == ["not_found"] and base_tables.sql == []
+
+
+def _run_with_concept(concept, drafts):
+    answers = _answers(
+        question_kind="quantitative", rule_ids=(), term_ids=(), metrics=(), undefined_concepts=(concept,),
+    )
+    model = SequenceModel(answers, drafts)
+    base_tables = FakeBaseTables()
+    events = []
+    generator = pipeline.run_agent(
+        f"{concept} theo giờ ở Hà Nội hôm qua?", [], model, lambda: CATALOG, (), run_metric=lambda *args: {},
+        today=TODAY, builder=base_tables.builder(),
+    )
+    while True:
+        try:
+            events.append(next(generator))
+        except StopIteration as finished:
+            return finished.value, events
+
+
+def test_a_concept_no_term_defines_but_the_data_names_is_answered_from_base_tables():
+    outcome, events = _run_with_concept("áp suất", [HOURLY_IN_HANOI])
+
+    assert "run_sql" in _steps(events) and "propose_missing_items" not in _steps(events)
+    assert outcome.result["source"] == "base_tables" and outcome.missing == ["glossary", "metric"]
+
+
+def test_a_concept_the_data_does_not_name_is_still_asked_back():
+    outcome, events = _run_with_concept("khách du lịch", [])
+
+    assert "link_question" not in _steps(events) and "draft_metric" not in _steps(events)
+    assert _steps(events)[-1] == "propose_missing_items" and outcome.result is None

@@ -35,6 +35,7 @@ def _goal_view(goal: Goal, graph: SchemaGraph) -> dict[str, Any]:
         "row_kinds": [{**where(item.table, item.column), "label": item.label, "value": item.value, "grain": item.grain}
                       for item in goal.row_kinds],
         "limit": goal.limit,
+        "order": goal.order,
     }
 
 

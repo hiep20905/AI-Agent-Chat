@@ -13,7 +13,7 @@ from text_to_bi.superset_ai_agent.modules.schema_link.services.drafting import (
     goal_from_draft,
 )
 from text_to_bi.superset_ai_agent.modules.schema_link.services.graph import SchemaGraph
-from text_to_bi.superset_ai_agent.modules.schema_link.services.linking import candidates_view, rank
+from text_to_bi.superset_ai_agent.modules.schema_link.services.linking import candidates_view, names_in_schema, rank
 
 WEATHER = json.loads((Path(__file__).parent / "fixtures" / "schema_graph_weather.json").read_text(encoding="utf-8"))
 GRAPH = SchemaGraph.from_payload(WEATHER)
@@ -180,3 +180,26 @@ def test_each_candidate_table_says_which_candidates_it_joins_to_by_keys():
 
     assert CITIES in reaches[OBSERVATIONS]
     assert CITIES not in reaches[LOADS]
+
+
+def test_a_ranking_question_orders_the_groups_by_its_measure_and_keeps_the_first():
+    most = GoalDraft(
+        found=True,
+        measures=[MeasureDraft(dataset_id=OBSERVATIONS, aggregation="COUNT")],
+        group_by=[GroupByDraft(dataset_id=CITIES, column="ten_thanh_pho")],
+        row_kinds=[RowKindDraft(dataset_id=OBSERVATIONS, value="HIEN_TAI")],
+        limit=1,
+        order="desc",
+    )
+
+    trace = link_question("Thành phố nào có nhiều quan sát hiện tại nhất?", GRAPH, DraftingModel(most), TODAY)
+
+    assert trace["status"] == "ok" and trace["stages"]["goal"]["order"] == "desc"
+    ordering = trace["sql"].split("ORDER BY")[1]
+    assert ordering.split(",")[0].strip() == "\"count_dong\" DESC NULLS LAST" and "LIMIT 1" in ordering
+
+
+def test_tables_columns_and_stored_values_name_a_concept_but_unrelated_words_do_not():
+    assert names_in_schema("lần nạp dữ liệu", GRAPH)
+    assert names_in_schema("thành phố", GRAPH)
+    assert not names_in_schema("giá vàng", GRAPH)
