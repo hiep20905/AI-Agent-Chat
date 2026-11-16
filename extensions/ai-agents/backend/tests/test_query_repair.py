@@ -275,3 +275,31 @@ def test_a_near_spelling_in_a_list_cut_short_goes_to_the_model_rather_than_being
     assert _steps(events)[3:] == ["query_metrics", "explore_values", "repair_query", "query_metrics"]
     assert '"truncated": true' in model.prompt("QueryRepair")
     assert outcome.result["rows"] == [{"nhiet_do_cao_nhat": 23.1}]
+
+
+class CountingSemanticLayer(CitiesSemanticLayer):
+    """Counts rainy days: a city the data does not hold as written counts 0 days, in one row, as a count does."""
+
+    def __call__(self, dataset_id, metric_id, query):
+        self.calls.append(query)
+        if query["dimensions"] == ["ten_thanh_pho"]:
+            return {"rows": [{"ten_thanh_pho": "Ha Noi", "nhiet_do_cao_nhat": "5"},
+                             {"ten_thanh_pho": "Hue", "nhiet_do_cao_nhat": "0"}]}
+        cities = [item["value"] for item in query["filters"] if item["column"] == "ten_thanh_pho"]
+        return {"rows": [{"nhiet_do_cao_nhat": "5" if cities == ["Ha Noi"] else "0"}]}
+
+
+def test_a_count_of_zero_while_a_name_may_be_misspelled_is_respelled_and_run_again():
+    outcome, events, _, _ = _run(_in_city("Hà Nội"), semantic_layer=CountingSemanticLayer())
+
+    assert _steps(events)[3:] == ["query_metrics", "explore_values", "query_metrics"]
+    assert outcome.result["rows"][0]["nhiet_do_cao_nhat"] == 5
+    assert [attempt["kind"] for attempt in outcome.attempts] == ["value_mismatch"]
+
+
+def test_a_count_of_zero_over_a_name_the_data_holds_as_written_is_the_answer():
+    outcome, events, _, _ = _run(_in_city("Hue"), semantic_layer=CountingSemanticLayer())
+
+    assert _steps(events)[3:] == ["query_metrics", "explore_values"]
+    assert outcome.result["rows"][0]["nhiet_do_cao_nhat"] == 0 and outcome.attempts == []
+    assert "repair_query" not in _steps(events)

@@ -81,7 +81,10 @@ bao nhiêu?").
 - `intent` của mỗi câu con: `value` (tra một giá trị), `list` (liệt kê thứ thoả điều kiện), `ranking` (cao nhất,
   thấp nhất, top N), `trend` (diễn biến theo thời gian), `comparison` (so nhóm hoặc so kỳ), `breakdown` (phân rã theo
   nhóm), `range` (dao động trong khoảng nào), `anomaly` (bất thường), `correlation` (liên quan giữa hai đại lượng),
-  `diagnostic` (vì sao), `forecast` (ngày tới, theo dự báo).
+  `diagnostic` (vì sao), `forecast` (ngày tới, theo dự báo). Câu hỏi về ngày sau hôm nay ("ngày mai", "tuần tới",
+  "cuối tuần này" khi chưa tới) là `forecast`, kể cả khi chỉ hỏi một con số. "Cao nhất", "thấp nhất" là một phần
+  tên chỉ số ("nhiệt độ cao nhất ở Hà Nội hôm qua", "tốc độ gió tối đa") thì là `value`; `ranking` chỉ khi xếp các
+  nhóm với nhau ("thành phố nào", "ngày nào", "top 3").
 `execution`: `single` khi có một câu con, `parallel` khi các câu con độc lập, `sequential` khi có `depends_on`.
 
 `reason`: một câu tiếng Việt giải thích nhãn.

@@ -33,6 +33,7 @@ from .repair import (
     ranked_values,
     refusal_kind,
     respelled_plan,
+    spelled_as_stored,
     text_filters,
 )
 from .retrieval import listed_metrics, similar_examples
@@ -1153,9 +1154,13 @@ def _query_with_repair(
                 # The look-up failed and says so; the model still gets the problem without the values.
                 stored = {}
             step += 1
+            stored_values = {name: column["values"] for name, column in stored.items()}
+            if stored and (last_result or {}).get("rows") and spelled_as_stored(plan, stored_values):
+                # A zero counted over values the data holds as written is the answer, not a misspelling.
+                outcome.attempts.pop()
+                break
             fixed, changes = respelled_plan(
-                plan, {name: column["values"] for name, column in stored.items()},
-                frozenset(name for name, column in stored.items() if column["truncated"]),
+                plan, stored_values, frozenset(name for name, column in stored.items() if column["truncated"]),
             )
             if fixed is not None:
                 plan, problem["fix"] = fixed, "; ".join(changes)

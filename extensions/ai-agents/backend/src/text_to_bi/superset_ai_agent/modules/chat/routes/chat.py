@@ -40,6 +40,12 @@ from ..services.pipeline import AgentOutcome, MetricBuilder, run_agent
 
 logger = logging.getLogger(__name__)
 FAILED_ANSWER_MESSAGE = "AI Agent không hoàn tất được câu trả lời."
+# The model provider refused for its own limits: out of credit (402) or too many requests (429).
+MODEL_LIMIT_STATUSES = (402, 429)
+MODEL_LIMIT_MESSAGE = (
+    "Dịch vụ mô hình AI đang hết hạn mức hoặc quá tải nên chưa trả lời được. Hãy thử lại sau ít phút; nếu vẫn lỗi, báo "
+    "quản trị viên kiểm tra hạn mức của khoá API."
+)
 
 
 def _data_table_labels(user_id: int, cookie_header: str) -> list[str]:
@@ -144,7 +150,8 @@ class TextToBIAgentAPI(RestApi):
             except Exception as unexpected:
                 logger.exception("AI Agent stream failed")
                 error = str(unexpected) or type(unexpected).__name__
-                yield sse_event("error", {"message": FAILED_ANSWER_MESSAGE})
+                limited = getattr(unexpected, "status_code", None) in MODEL_LIMIT_STATUSES
+                yield sse_event("error", {"message": MODEL_LIMIT_MESSAGE if limited else FAILED_ANSWER_MESSAGE})
             # The log is written after the answer streamed; a failed write is logged and never breaks the answer.
             try:
                 question_id = log_question(

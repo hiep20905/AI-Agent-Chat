@@ -100,13 +100,33 @@ def text_filters(filters: list[dict[str, Any]], columns: dict[str, dict[str, Any
     return found
 
 
+def counted_nothing(result: dict[str, Any]) -> bool:
+    """Rows whose every figure is 0 or empty: a count over no matching row is one row of 0, as empty as no row when a
+    filter may be misspelled ("Hà Nội" where the data holds "Ha Noi")."""
+    names = [metric["name"] for metric in result.get("metrics", [])]
+    return bool(result.get("rows")) and all(row.get(name) in (None, 0) for row in result["rows"] for name in names)
+
+
 def empty_result_kind(result: dict[str, Any], columns: dict[str, dict[str, Any]]) -> str | None:
-    """Why a result has no row, or None when it has rows: outside the data, a spelling that may miss, or no match."""
-    if result.get("total_rows"):
+    """Why a result has no row, or None when it has rows: outside the data, a spelling that may miss, or no match.
+
+    Rows of nothing but zeros count as none while a text filter may be misspelled; then the spelling is checked.
+    """
+    if result.get("total_rows") and not (counted_nothing(result) and text_filters(result["filters"], columns)):
         return None
     if (result.get("coverage") or {}).get("status") == "none":
         return "out_of_range"
     return "value_mismatch" if text_filters(result["filters"], columns) else "no_match"
+
+
+def spelled_as_stored(plan: dict[str, Any], stored_values: dict[str, list[Any]]) -> bool:
+    """Whether every value the plan filters an explored column on is written exactly as the data holds it."""
+    for item in plan.get("filters", []):
+        stored = stored_values.get(item.get("column"))
+        asked = item["value"] if isinstance(item["value"], list) else [item["value"]]
+        if stored is not None and any(value not in stored for value in asked):
+            return False
+    return True
 
 
 def respelled_plan(

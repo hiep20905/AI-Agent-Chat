@@ -39,6 +39,7 @@ có dòng nào", kể cả khi rỗng chỉ vì viết sai một giá trị. Tr�
 | `no_match` | Đúng là không có dòng nào thoả (ngưỡng, khoảng thời gian không có sự kiện) | 0 dòng, không có bộ lọc chữ | Không thử lại; nói không có trường hợp thoả | Có |
 | `suspicious_value` | Kết quả có nhưng bất thường: toàn 0 hoặc rỗng, giá trị ngoài miền hợp lý | Hiện chỉ có với metric tạm tính (`doubt`) | Cảnh báo, không khẳng định | Một phần |
 | `wrong_meaning` | Chọn sai metric, sai chiều, sai khoảng thời gian dù truy vấn chạy được | Không nhận biết lúc chạy; chỉ thấy qua benchmark | Đo bằng benchmark (việc 9–11) | Chưa |
+| `model_limit` | Nhà cung cấp mô hình từ chối vì hạn mức: hết credit hoặc quá nhiều yêu cầu | Lỗi 402 hoặc 429 từ OpenRouter (gặp khi chạy benchmark ngày 16/11/2026) | Không thử lại; báo người hỏi dịch vụ mô hình đang hết hạn mức hoặc quá tải, thử lại sau hoặc báo quản trị viên | Có |
 | `bad_model_output` | Model trả đầu ra hỏng | Lỗi parse đầu ra có cấu trúc | Hiện báo lỗi bước đó; nên thử lại một lần | Chưa |
 
 Bước `repair_query` lỗi (model không phản hồi) thì dừng thử và giải thích lỗi đang có. Bước `explore_values` lỗi thì
