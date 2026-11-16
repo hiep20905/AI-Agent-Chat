@@ -36,8 +36,16 @@ def _alias(name: str, taken: set[str]) -> str:
 
 
 def build_sql(goal: Goal, tree: JoinTree, graph: SchemaGraph) -> str:
+    """The SELECT answering the goal over the join tree.
+
+    A table reached against a key (one root row to many of its rows) is never joined, since each root row would be
+    counted once per matching row: its filters become `EXISTS (SELECT 1 …)` on the table it hangs from, so a root row
+    is kept once when at least one related row passes them. Grouping by such a table has no single right answer and is
+    refused before this (`grouped_behind_fanout`).
+    """
     dialect = DIALECTS.get(graph.dialect, "postgres")
     aliases = {table: f"t{index}" for index, table in enumerate(tree.tables)}
+    behind = tree.behind_fanout()
 
     def table(table_id: int) -> exp.Expression:
         node = graph.tables[table_id]
@@ -46,10 +54,40 @@ def build_sql(goal: Goal, tree: JoinTree, graph: SchemaGraph) -> str:
     def column(table_id: int, name: str) -> exp.Expression:
         return exp.column(name, table=aliases[table_id], quoted=True)
 
+    def conditions_on(tables: set[int]) -> list[exp.Expression]:
+        found = []
+        for item in goal.filters:
+            if item.table not in tables:
+                continue
+            timestamp = (graph.column(item.table, item.column) or {}).get("temporal_kind") == "timestamp"
+            sent = {"column": item.column, "operator": item.operator, "value": item.value}
+            for part in whole_day_filters(sent, timestamp):
+                found.append(_condition(column(item.table, item.column), part["operator"], part["value"]))
+        found += [
+            _condition(column(item.table, item.column), "==", item.value)
+            for item in goal.row_kinds if item.table in tables
+        ]
+        return found
+
     query = exp.select().from_(table(tree.root))
     for step in tree.steps:
-        joined_on = exp.EQ(this=column(step.start, step.start_column), expression=column(step.end, step.end_column))
-        query = query.join(table(step.end), on=joined_on)
+        if step.end not in behind:
+            joined_on = exp.EQ(this=column(step.start, step.start_column), expression=column(step.end, step.end_column))
+            query = query.join(table(step.end), on=joined_on)
+    semi_joins = []
+    for branch in dict.fromkeys(behind.values()):
+        tables = {table_id for table_id, first in behind.items() if first is branch}
+        related = exp.select(exp.Literal.number(1)).from_(table(branch.end))
+        for step in tree.steps:
+            if step is not branch and step.end in tables:
+                joined_on = exp.EQ(
+                    this=column(step.start, step.start_column), expression=column(step.end, step.end_column),
+                )
+                related = related.join(table(step.end), on=joined_on)
+        linked = exp.EQ(
+            this=column(branch.end, branch.end_column), expression=column(branch.start, branch.start_column),
+        )
+        semi_joins.append(exp.Exists(this=related.where(exp.and_(linked, *conditions_on(tables)))))
 
     taken: set[str] = set()
     groups = []
@@ -73,14 +111,7 @@ def build_sql(goal: Goal, tree: JoinTree, graph: SchemaGraph) -> str:
         measured.append(_alias(name, taken))
         query = query.select(exp.alias_(aggregated, measured[-1], quoted=True))
 
-    conditions = []
-    for item in goal.filters:
-        timestamp = (graph.column(item.table, item.column) or {}).get("temporal_kind") == "timestamp"
-        sent = {"column": item.column, "operator": item.operator, "value": item.value}
-        for part in whole_day_filters(sent, timestamp):
-            conditions.append(_condition(column(item.table, item.column), part["operator"], part["value"]))
-    for item in goal.row_kinds:
-        conditions.append(_condition(column(item.table, item.column), "==", item.value))
+    conditions = conditions_on(set(tree.tables) - set(behind)) + semi_joins
     if conditions:
         query = query.where(exp.and_(*conditions))
     if groups:
@@ -92,6 +123,12 @@ def build_sql(goal: Goal, tree: JoinTree, graph: SchemaGraph) -> str:
     elif groups:
         query = query.order_by(*[expression.copy() for expression in groups])
     return query.limit(goal.limit).sql(dialect=dialect, pretty=True)
+
+
+def grouped_behind_fanout(goal: Goal, tree: JoinTree) -> list[str]:
+    """The groupings on a table reached against a key: a root row would belong to several groups at once."""
+    behind = tree.behind_fanout()
+    return [item.label for item in goal.group_by if item.table in behind]
 
 
 def build_dataset_sql(goal: Goal, tree: JoinTree, graph: SchemaGraph) -> tuple[str, list[str | None], list[str]]:

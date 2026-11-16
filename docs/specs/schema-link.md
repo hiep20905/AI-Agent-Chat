@@ -272,7 +272,7 @@ Bước 1–3 dùng được ngay cho quản trị và không đổi câu trả 
 | "Nhiệt độ trung bình theo giờ ở Hà Nội hôm qua theo dữ liệu gốc" | `tb_gia_tri_quan_sat` → `tb_quan_sat_thoi_tiet` → `dm_thanh_pho`, và → `dm_chi_so_thoi_tiet` | 24 dòng, `AVG(gia_tri_so)`, lọc chỉ số nhiệt độ, `loai_quan_sat = 'DU_BAO_GIO'`. Khớp với fact (28,76 °C trung bình ngày) |
 | "Thành phố nào có nhiều quan sát hiện tại nhất?" | `tb_quan_sat_thoi_tiet` → `dm_thanh_pho` | `COUNT`, xếp hạng, nhãn thành phố |
 | Câu hỏi về bảng không có quan hệ đã duyệt | Không có đường | Nói rõ chưa nối được dữ liệu, ghi log cho quản trị viên |
-| Câu hỏi cần đi ngược chiều một → nhiều | Gộp trước trong subquery | Số không bị nhân dòng |
+| Câu hỏi cần đi ngược chiều một → nhiều | Bảng phía nhiều đọc qua `EXISTS (SELECT 1 …)` thay vì join (đã làm 16/11/2026); chia nhóm theo bảng đó thì từ chối và nói lý do | Số không bị nhân dòng: "bao nhiêu thành phố có quan sát hiện tại hôm nay" ra 12, join thẳng ra 36 |
 
 ## 8. Quyết định thêm (duyệt 26/10/2026)
 

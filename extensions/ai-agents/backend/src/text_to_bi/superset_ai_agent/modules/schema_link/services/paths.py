@@ -31,6 +31,17 @@ class JoinTree:
     def tables(self) -> list[int]:
         return [self.root, *(step.end for step in self.steps)]
 
+    def behind_fanout(self) -> dict[int, Step]:
+        """Each table reached through a step against a key (one root row to many of its rows), mapped to the first
+        such step on its way from the root; tables joined without repeating a root row are left out."""
+        behind: dict[int, Step] = {}
+        for step in self.steps:
+            if step.start in behind:
+                behind[step.end] = behind[step.start]
+            elif step.fanout:
+                behind[step.end] = step
+        return behind
+
 
 def _shortest_paths(graph: SchemaGraph, source: int, allow_fanout: bool):
     """Dijkstra from `source`: the cost of each table, the step that reached it, and how many cheapest paths do."""

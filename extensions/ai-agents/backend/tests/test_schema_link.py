@@ -171,3 +171,29 @@ def test_goals_that_do_not_fit_the_graph_stop_at_the_goal_stage(goal):
 
     assert trace["status"] == "invalid_goal" and trace["stages"]["goal"]["status"] == "failed"
     assert trace["stages"]["path"]["status"] == "pending"
+
+
+CITIES_OBSERVED_NOW = {
+    "measures": [{"dataset_id": CITIES, "aggregation": "COUNT"}],
+    "filters": [{"dataset_id": OBSERVATIONS, "column": "thoi_diem_quan_sat", "operator": "==", "value": "2026-11-16"}],
+    "row_kinds": [{"dataset_id": OBSERVATIONS, "value": "HIEN_TAI"}],
+}
+
+
+def test_a_filter_on_a_table_with_many_rows_per_root_row_is_an_exists_so_no_row_is_counted_twice():
+    # Each city has many observations: joining them would count a city once per observation.
+    trace = analyze(CITIES_OBSERVED_NOW, SchemaGraph.from_payload(WEATHER))
+
+    assert trace["status"] == "ok" and trace["stages"]["path"]["semi_joined"] == [OBSERVATIONS]
+    sql = trace["sql"]
+    assert "JOIN" not in sql and "EXISTS(" in sql.replace(" ", "")
+    assert '"loai_quan_sat" = \'HIEN_TAI\'' in sql and '"thanh_pho_id" = "t0"."thanh_pho_id"' in sql
+    assert sql.index("COUNT(*)") < sql.index("EXISTS")
+
+
+def test_grouping_by_a_table_with_many_rows_per_root_row_is_refused_with_why():
+    grouped = {**CITIES_OBSERVED_NOW, "group_by": [{"dataset_id": OBSERVATIONS, "column": "loai_quan_sat"}]}
+
+    trace = analyze(grouped, SchemaGraph.from_payload(WEATHER))
+
+    assert trace["status"] == "fanout" and "nhiều nhóm" in trace["message"] and trace["sql"] is None

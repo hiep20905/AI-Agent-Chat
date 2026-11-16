@@ -8,7 +8,7 @@ from .goal import Goal, grain_problems, resolve_goal
 from .graph import SchemaGraph
 from .linking import candidates_view, rank
 from .paths import JoinTree, join_tree
-from .sql import build_sql
+from .sql import build_sql, grouped_behind_fanout
 
 STAGES = ("goal", "nodes", "graph", "path")
 
@@ -75,6 +75,8 @@ def _path_view(tree: JoinTree, graph: SchemaGraph) -> dict[str, Any]:
         "root": tree.root,
         "cost": tree.cost,
         "fanout": tree.fanout,
+        # Tables reached against a key, read through EXISTS rather than joined, so no root row is counted twice.
+        "semi_joined": sorted(tree.behind_fanout()),
         "tables": tree.tables,
         "steps": [
             {
@@ -128,9 +130,14 @@ def analyze(raw_goal: dict[str, Any], graph: SchemaGraph) -> dict[str, Any]:
         return stop("no_path", f"Chưa nối được dữ liệu: không có quan hệ đã duyệt nào dẫn tới {names}.")
     path = _path_view(tree, graph)
     problems = grain_problems(goal, tree.tables, graph)
-    if tree.fanout:
-        stage("path", started, "failed", **path, error="Đường nối đi ngược chiều một → nhiều nên sẽ nhân dòng.")
-        return stop("fanout", "Đường nối duy nhất sẽ nhân dòng; cần gộp trước ở bảng gốc (chưa hỗ trợ).")
+    grouped = grouped_behind_fanout(goal, tree)
+    if grouped:
+        message = (
+            f"Chia theo {', '.join(grouped)} phải đi ngược chiều một → nhiều, nên một dòng sẽ thuộc nhiều nhóm cùng "
+            "lúc; hãy chia theo cột khác, hoặc đo trên chính bảng chứa cột đó."
+        )
+        stage("path", started, "failed", **path, error=message)
+        return stop("fanout", message)
     if problems:
         stage("path", started, "failed", **path, problems=problems)
         return stop(problems[0]["kind"], problems[0]["message"])

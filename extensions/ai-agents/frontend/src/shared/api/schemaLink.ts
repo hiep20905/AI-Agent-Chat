@@ -50,6 +50,7 @@ export type PathStage = StageBase & {
   root?: number;
   cost?: number;
   fanout?: boolean;
+  semi_joined?: number[];
   tables?: number[];
   steps?: PathStep[];
   alternatives?: Record<string, number[][]>;

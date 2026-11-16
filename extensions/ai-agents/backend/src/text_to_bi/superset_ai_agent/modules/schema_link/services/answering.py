@@ -115,12 +115,15 @@ def _identifier(text: str) -> str:
 def dataset_proposal(goal_raw: dict[str, Any], graph: SchemaGraph, question: str) -> dict[str, Any] | None:
     """A virtual dataset that would answer this kind of question again, with the metric it needs, for an administrator
     to create: the join without the asked period or place (`build_dataset_sql`). None when its measure cannot be a
-    metric contract (a distinct count) or it measures several things.
+    metric contract (a distinct count), it measures several things, or its join reaches a table against a key.
     """
     goal = resolve_goal(goal_raw, graph)
     if len(goal.measures) != 1 or goal.measures[0].aggregation not in METRIC_AGGREGATIONS:
         return None
     tree = join_tree(graph, goal.root, goal.terminals)
+    if tree.fanout:
+        # A dataset row per root row cannot carry a table that has many rows per root row.
+        return None
     sql, measured, selected = build_dataset_sql(goal, tree, graph)
     measure = goal.measures[0]
     root = graph.tables[goal.root]
