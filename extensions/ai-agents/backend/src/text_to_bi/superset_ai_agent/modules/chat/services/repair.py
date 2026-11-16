@@ -15,7 +15,7 @@ CLOSE_MATCH_CUTOFF = 0.85
 CONTAINED_SHARE = 0.6
 
 # The kinds of failure docs/specs/xu-ly-loi-truy-van.md names, and whether trying again can mend them.
-REPAIRABLE_KINDS = ("value_mismatch", "invalid_plan", "rejected_query", "transient")
+REPAIRABLE_KINDS = ("value_mismatch", "wrong_row_kind", "invalid_plan", "rejected_query", "transient")
 FINAL_KINDS = ("not_allowed", "out_of_range", "no_match")
 
 

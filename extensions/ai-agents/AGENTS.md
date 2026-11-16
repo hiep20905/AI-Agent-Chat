@@ -97,7 +97,15 @@ numbers, and logs the question so administrators can fill the gaps:
    `part_result` event (`id`, `question`, `result`, `query_error`, `skipped`).
    A failing sub-question keeps its error and the others go on; one whose
    source found nothing is `skipped`; only when every one fails does the
-   question fail. The call rewrites a follow-up into a standalone question;
+   question fail. Before the call, `chat/services/retrieval.py` ranks the
+   approved metrics against the question without a model (whole names, codes
+   and linked glossary terms first, then rare words of names and definitions;
+   a catalog over 40 metrics lists only its 15 best plus what the turn before
+   queried) and finds up to three questions answered before with an approved
+   metric that share at least half their words with it (the FAQ, from the
+   question log); both go into the prompt and into the step's `retrieved`
+   argument (docs/specs/truy-hoi-metric-va-faq.md).
+   The call rewrites a follow-up into a standalone question;
    picks the glossary terms, metrics, expert rules and the user's own
    definitions the question is
    about (IDs it invents are dropped); lists `undefined_concepts` (business

@@ -220,6 +220,20 @@ def test_no_row_while_filtering_on_words_is_drafted_again_to_spell_as_the_data_d
     assert "values" in second and outcome.result["row_count"] == 2
 
 
+def test_an_indicator_the_chosen_kind_of_row_lacks_is_drafted_again_on_another_kind_of_row():
+    # The highest of no row is one row of NULL, as empty as no row; a count of nothing (0) would be an answer.
+    hourly = HOURLY_IN_HANOI.model_copy(update={"group_by": [], "filters": []})
+    daily = hourly.model_copy(update={"row_kinds": [RowKindDraft(dataset_id=OBSERVATIONS, value="DU_BAO_NGAY")]})
+    nothing = {"columns": ["nhiet_do_c"], "rows": [{"nhiet_do_c": None}], "row_count": 1, "truncated": False}
+    found = {**nothing, "rows": [{"nhiet_do_c": 31.5}]}
+    outcome, _, model, base_tables = _run([hourly, daily], FakeBaseTables(answers=[nothing, found]))
+
+    assert [attempt["kind"] for attempt in outcome.attempts] == ["wrong_row_kind"]
+    second = [messages for name, messages in model.prompts if name == "GoalDraft"][1][1][1]
+    assert "DU_BAO_GIO" in second and "'DU_BAO_NGAY'" in base_tables.sql[1]
+    assert outcome.result["rows"] == [{"nhiet_do_c": 31.5}]
+
+
 def test_without_approved_relationships_the_question_still_goes_to_a_dataset_proposal():
     empty_graph = {"database": {"dialect": "postgresql"}, "tables": [], "edges": []}
     dataset_draft = pipeline.DatasetDraft(name="", sql="", reason="Không soạn được.")

@@ -10,9 +10,11 @@ from ..exceptions import (
     RetriedQuestionError,
     RetriedQuestionNotFoundError,
 )
-from .pipeline import MAX_HISTORY_TURNS, AgentOutcome, previous_queries, recent_history
+from .pipeline import MAX_HISTORY_TURNS, AgentOutcome, answered_example, previous_queries, recent_history
 
 MAX_QUESTION_LENGTH = 2000
+# How many questions answered before are searched for examples of a new one.
+MAX_ANSWERED_EXAMPLES = 300
 
 
 def _is_id(value: Any) -> bool:
@@ -70,6 +72,12 @@ def last_queries(session_id: int, excluded_question_id: int | None) -> list[dict
         return []
     query_result, part_results = answered
     return previous_queries(query_result, part_results)
+
+
+def answered_examples() -> list[dict[str, Any]]:
+    """Questions answered before with an approved metric, newest first: the FAQ the agent takes examples from."""
+    rows = question_repository().answered_with_metrics(MAX_ANSWERED_EXAMPLES)
+    return [example for example in (answered_example(*row) for row in rows) if example]
 
 
 def record_tool_call(tool_calls: list[dict[str, Any]], name: str, data: dict[str, Any]) -> None:

@@ -30,6 +30,7 @@ có dòng nào", kể cả khi rỗng chỉ vì viết sai một giá trị. Tr�
 | Mã | Lỗi | Cách nhận biết | Xử lý | Đã làm |
 | --- | --- | --- | --- | --- |
 | `value_mismatch` | Giá trị lọc không đúng cách viết trong dữ liệu (dấu, hoa thường, viết tắt, tên khác) | 0 dòng, có bộ lọc chữ trên cột không phải thời gian, không phải ngưỡng của expert rule | `explore_values`: nhóm chính metric đó theo cột, không bộ lọc, lấy giá trị thật; so khớp không dấu (mục 4) rồi chạy lại. Không khớp được thì `repair_query` với danh sách giá trị | Có |
+| `wrong_row_kind` | Trả lời từ dữ liệu gốc: chỉ số chọn không có ở loại dòng đã chọn (chỉ số của cả ngày đọc trên dòng theo giờ) | Không có giá trị đo nào (0 dòng, hoặc một dòng toàn NULL vì `MAX` trên không dòng nào), có loại dòng và chỉ số, không có bộ lọc chữ | `link_question` lại, báo model loại dòng đã chọn không có dữ liệu cho chỉ số | Có |
 | `invalid_plan` | Kế hoạch không qua kiểm tra: cột không lọc hay nhóm được, phép so sánh, sai kiểu (chữ cho cột khoá số), thiếu giá trị | `QueryPlanError` | `repair_query`: model sửa theo thông báo lỗi | Có |
 | `rejected_query` | Superset không nhận hoặc chạy lỗi truy vấn | Semantic Layer trả 400 hoặc 500 | `repair_query` | Có |
 | `transient` | Semantic Layer không phản hồi, quá tải, hết thời gian | Không kết nối được, hoặc trả 429, 502, 503, 504 | Chạy lại nguyên truy vấn | Có |

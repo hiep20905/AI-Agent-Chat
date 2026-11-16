@@ -41,6 +41,20 @@ class AgentQuestionRepository(BaseRepository[AgentQuestion]):
             .first()
         )
 
+    def answered_with_metrics(self, limit: int) -> list[tuple[str, list, dict]]:
+        """The last questions answered with an approved metric, as (question as understood, metrics, query_result),
+        newest first."""
+        rows = (
+            self.session.query(AgentQuestion.question, AgentQuestion.rewritten_question)
+            .add_columns(AgentQuestion.metrics, AgentQuestion.query_result)
+            .filter(AgentQuestion.status == "resolved", AgentQuestion.error.is_(None))
+            .filter(AgentQuestion.query_result.isnot(None))
+            .order_by(AgentQuestion.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return [(rewritten or question, metrics, result) for question, rewritten, metrics, result in rows if result]
+
     def detach_session(self, session_id: int) -> None:
         """Keep a deleted conversation's questions in the log with no session."""
         self.query().filter(AgentQuestion.session_id == session_id).update({AgentQuestion.session_id: None})

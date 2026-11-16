@@ -34,6 +34,7 @@ from .repair import (
     respelled_plan,
     text_filters,
 )
+from .retrieval import listed_metrics, similar_examples
 from .triage import TRIAGE_STATUSES, QuestionTriage, SubQuestion, blocked_reply, checked_triage
 
 MAX_HISTORY_TURNS = 3
@@ -597,6 +598,13 @@ def _text_filtered(trace: dict[str, Any], graph: SchemaGraph) -> bool:
     )
 
 
+def _measured_nothing(result: dict[str, Any]) -> bool:
+    """No row, or no measured value in any row: an aggregate over no matching row returns one row of NULL (the MAX of
+    nothing), which is as empty as no row. A count of nothing is 0, a real answer."""
+    names = [metric["name"] for metric in result["metrics"]]
+    return all(row.get(name) is None for row in result["rows"] for name in names)
+
+
 def _offer_dataset(
     step: int, trace: dict[str, Any], graph: SchemaGraph, asked: str, builder: MetricBuilder, result: dict[str, Any],
 ):
@@ -691,15 +699,26 @@ def _answer_from_base_tables(
             continue
         step += 1
         result = base_table_result(trace, answer, graph)
-        if not result["rows"] and _text_filtered(trace, graph) and attempt < MAX_QUERY_ATTEMPTS:
-            outcome.attempts.append({"attempt": attempt, "kind": "value_mismatch", "detail": EMPTY_RESULT_DETAIL})
-            trace = None
-            feedback = (
-                "Không có dòng nào khớp: giá trị lọc chữ phải viết đúng như trong `values` của cột ứng viên, và loại "
-                "dòng đã chọn có thể không có dữ liệu cho chỉ số này (thử loại dòng khác, ví dụ dòng theo giờ gom bằng "
-                "`time_grain`)."
-            )
-            continue
+        goal = trace["stages"]["goal"]
+        if _measured_nothing(result) and attempt < MAX_QUERY_ATTEMPTS:
+            if _text_filtered(trace, graph):
+                kind, feedback = "value_mismatch", (
+                    "Không có dòng nào khớp: giá trị lọc chữ phải viết đúng như trong `values` của cột ứng viên, và "
+                    "loại dòng đã chọn có thể không có dữ liệu cho chỉ số này (thử loại dòng khác)."
+                )
+            elif goal.get("row_kinds") and any(item.get("indicator") for item in goal.get("measures", [])):
+                # An indicator kept only on daily rows (a day's highest gust) reads nothing from hourly rows.
+                chosen = ", ".join(str(item["value"]) for item in goal["row_kinds"])
+                kind, feedback = "wrong_row_kind", (
+                    f"Không có giá trị nào: chỉ số đã chọn không có dữ liệu ở loại dòng {chosen}. Chọn loại dòng khác "
+                    "của bảng: chỉ số của cả ngày nằm ở dòng theo ngày, chỉ số đo từng lúc ở dòng theo giờ."
+                )
+            else:
+                kind = None
+            if kind is not None:
+                outcome.attempts.append({"attempt": attempt, "kind": kind, "detail": EMPTY_RESULT_DETAIL})
+                trace = None
+                continue
         step = yield from _offer_dataset(step, trace, graph, asked, builder, result)
         outcome.result = result
         yield "result", result
@@ -727,6 +746,20 @@ def _previous_query(result: dict[str, Any]) -> dict[str, Any] | None:
         "comparison": {key: comparison[key] for key in ("label", "start", "end")} if comparison else None,
         "scope": result.get("scope"),
         "rows": result.get("rows", [])[:MAX_PREVIOUS_ROWS],
+    }
+
+
+def answered_example(question: str, metrics: list[dict[str, Any]], query_result: dict[str, Any]) -> dict | None:
+    """A question answered before as an example for a new one: its metrics and what it grouped and filtered by, without
+    its period or rows, since a new question computes its own."""
+    query = _previous_query(query_result)
+    if query is None or not metrics:
+        return None
+    return {
+        "question": question,
+        "metrics": [{key: item.get(key) for key in ("dataset_id", "metric_id", "name")} for item in metrics],
+        "dimensions": query["dimensions"],
+        "filters": [item for item in query["filters"] if item.get("source") != "time"],
     }
 
 
@@ -823,13 +856,15 @@ def _answer_question(
     builder: MetricBuilder | None,
     outcome: AgentOutcome,
     previous: Sequence[dict[str, Any]] = (),
+    answered: Sequence[dict[str, Any]] = (),
 ):
     """Understand one single-intent question against the catalog, then answer it with approved metrics or say what is
     missing. Its steps are numbered from `first_step`; returns the context the final answer is written from.
 
     With a `builder`, a question that only lacks a metric climbs to the data model and builds one. `previous` is what
     the turn before queried, given for a follow-up: the model builds on its filters, and a plan on the same dataset
-    that names no period keeps that turn's period.
+    that names no period keeps that turn's period. `answered` are questions answered before; the closest ones are shown
+    as examples of the metrics and filters that answered them, and the metrics are listed best match first.
     """
     definitions_by_id = {item["id"]: item for item in user_definitions}
     user_rules_by_id = {item_id: item for item_id, item in definitions_by_id.items() if item["kind"] == "expert_rule"}
@@ -837,19 +872,32 @@ def _answer_question(
     metrics_by_key = {(metric["dataset_id"], metric["metric_id"]): metric for metric in catalog.metrics}
     rules_by_id = {rule["id"]: rule for rule in catalog.expert_rules}
 
+    kept_keys = [(item["dataset_id"], metric_id) for item in previous for metric_id in item["metric_ids"]]
+    metrics = listed_metrics(question, catalog.metrics, catalog.glossary_terms, kept_keys)
+    listed_datasets = {metric["dataset_id"] for metric in metrics}
+    examples = similar_examples(question, answered, set(metrics_by_key))
     understanding_input = "\n\n".join((
         _today_block(today),
         f"Lịch sử hội thoại:\n{_conversation(history)}",
         f"Câu hỏi mới nhất: {question}",
         _data_block("Thuật ngữ đã duyệt", _described(catalog.glossary_terms, TERM_FIELDS)),
-        _data_block("Metric đã duyệt", _described(catalog.metrics, METRIC_FIELDS)),
+        _data_block("Metric đã duyệt, khớp câu hỏi nhất trước", _described(metrics, (*METRIC_FIELDS, "match"))),
         _data_block("Expert rule đã duyệt", _described(catalog.expert_rules, RULE_FIELDS)),
         _data_block("Cách hiểu người dùng đã xác nhận", _described(list(user_definitions), USER_DEFINITION_FIELDS)),
-        _data_block("Dataset: cột và giá trị có nhãn", catalog.datasets),
+        _data_block(
+            "Dataset: cột và giá trị có nhãn", [item for item in catalog.datasets if item["id"] in listed_datasets],
+        ),
+        *([_data_block("Câu hỏi tương tự đã trả lời", examples)] if examples else []),
         *([_data_block("Truy vấn lượt trước", list(previous))] if previous else []),
     ))
+    retrieved = {
+        "metrics_listed": len(metrics),
+        "best_metrics": [{"name": item["name"], "match": item["match"]} for item in metrics[:3] if item.get("match")],
+        "examples": [{"question": item["question"], "similarity": item["similarity"]} for item in examples],
+    }
     understanding = yield from _tool_call(
-        first_step, "understand_question", {"question": question, "history_turns": len(history) // 2},
+        first_step, "understand_question",
+        {"question": question, "history_turns": len(history) // 2, "retrieved": retrieved},
         lambda: _ask(model, Understanding, prompts.UNDERSTAND_QUESTION, understanding_input),
         lambda value: _understanding_shown(value, terms_by_id, metrics_by_key, rules_by_id, definitions_by_id),
     )
@@ -1325,8 +1373,10 @@ def run_agent(
     dashboard: str | None = None,
     previous: Sequence[dict[str, Any]] = (),
     data_tables: Sequence[str] = (),
+    answered: Sequence[dict[str, Any]] = (),
 ) -> Iterator[Event]:
     """Run one question asked on the dashboard titled `dashboard`; `user_definitions` are what the user confirmed there.
+    `answered` are questions answered before, from which the closest are shown as examples (the FAQ).
 
     The question is classified first; only one answerable from the data goes on to the catalog and a metric query. A
     question split into sub-questions answers each on its own (docs/specs/taxonomy-cau-hoi.md §6), and the final
@@ -1351,7 +1401,9 @@ def run_agent(
 
         def answer(text: str, part: AgentOutcome):
             # Each sub-question already stands on its own, so it is understood without the conversation.
-            return _answer_question(3, text, [], catalog, model, user_definitions, run_metric, today, builder, part)
+            return _answer_question(
+                3, text, [], catalog, model, user_definitions, run_metric, today, builder, part, (), answered,
+            )
 
         parts = yield from _answer_parts(triage, answer, outcome)
         context = {"today": iso_datetime(today), "question": question, "parts": parts}
@@ -1361,7 +1413,7 @@ def run_agent(
         earlier = previous if triage.follow_up != "new" else ()
         answered = yield from _answer_question(
             3, understood_question, history, catalog, model, user_definitions, run_metric, today, builder, outcome,
-            earlier,
+            earlier, answered,
         )
         context = {"today": iso_datetime(today), **answered}
     if triage.set_aside:

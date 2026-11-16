@@ -28,6 +28,7 @@ from ...semantic_layer.services.metrics import create_agent_metric, run_metric_q
 from ...sessions.services.sessions import require_own_session, start_session, touch_session
 from ...superset.services.dashboards import dashboard_titles, require_dashboard_access
 from ..services.conversation import (
+    answered_examples,
     asked_question,
     last_queries,
     log_question,
@@ -91,6 +92,7 @@ class TextToBIAgentAPI(RestApi):
         history = session_history(session_id, retry_of)
         # What the last answered turn queried, so a follow-up keeps its filters and period.
         previous = last_queries(session_id, retry_of)
+        answered = answered_examples()
         user_definitions = definitions_for_agent(user_id, dashboard_id)
         # The dashboard's title tells the question classifier what the data is about.
         dashboard_title = dashboard_titles({dashboard_id}).get(dashboard_id)
@@ -126,6 +128,7 @@ class TextToBIAgentAPI(RestApi):
                     dashboard=dashboard_title,
                     previous=previous,
                     data_tables=data_tables,
+                    answered=answered,
                 )
                 while True:
                     try:
