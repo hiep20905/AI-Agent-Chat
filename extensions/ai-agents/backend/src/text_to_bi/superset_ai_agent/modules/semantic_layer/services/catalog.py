@@ -136,6 +136,8 @@ def flatten_catalog(
             "definition": metric.get("business_definition") or metric.get("description"),
             "unit": metric.get("unit"),
             "d3format": metric.get("d3format"),
+            # The aggregate the approved expression is wrapped in (SUM, COUNT, AVG…); None for a ratio or older layers.
+            "aggregation": metric.get("aggregation"),
             "glossary_term_ids": [term["term_id"] for term in metric.get("glossary_terms") or []],
             "query_defaults": query_defaults_entry(metric.get("query_defaults")),
         }

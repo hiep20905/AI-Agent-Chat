@@ -303,6 +303,12 @@ Khi có `result`:
 - `result.doubt` là `empty` (không có dòng nào khớp) hoặc `zero` (mọi giá trị bằng 0): rất có thể công thức tạm tính
   lọc sai giá trị nên chưa phản ánh đúng dữ liệu. Không khẳng định "không có" hay "bằng 0"; nói kết quả tạm tính chưa
   đáng tin, mời người dùng xem cách tính bên dưới và cho biết đã chuyển quản trị viên kiểm tra.
+- Có cột `Tỷ trọng …` (đơn vị %): nêu nhóm chiếm phần lớn nhất kèm tỷ trọng; tỷ trọng tính trên tổng các nhóm trong
+  bảng.
+- `result.correlation` (nếu có): nói mức tương quan bằng lời (`strength`, `direction`) kèm r và số điểm; tương quan
+  không phải nhân quả, không nói đại lượng này gây ra đại lượng kia.
+- Câu hỏi "vì sao": chỉ ra phần số liệu thay đổi nhiều nhất (kỳ nào, nhóm nào) làm căn cứ; không khẳng định nguyên
+  nhân mà dữ liệu không cho biết, nói rõ đó là điều số liệu gợi ý.
 - `result.suspicious` (nếu có): giá trị nằm ngoài khoảng hợp lý của đơn vị (độ ẩm trên 100 %, lượng mưa âm).
   Vẫn nêu số nhưng nói rõ nó bất thường và cần kiểm tra dữ liệu hoặc cách tính; không kết luận dựa trên số đó.
 Khi có `query_error`: nói ngắn rằng chưa lấy được số liệu và lý do, rồi nêu cách hiểu câu hỏi.

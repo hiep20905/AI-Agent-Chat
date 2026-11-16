@@ -17,6 +17,11 @@ NEEDS_TWO_SIDES = (
     "hoặc hai metric."
 )
 NO_TIME_COLUMN = "Câu hỏi diễn biến cần chia theo thời gian, nhưng metric không có cột thời gian nhóm được."
+NEEDS_TWO_METRICS = "Câu hỏi tương quan cần hai metric trong `metric_ids`, đo trên cùng các ngày hoặc cùng các nhóm."
+NEEDS_CONTRAST = (
+    "Câu hỏi vì sao cần số liệu để đối chiếu: `comparison` với kỳ trước, hoặc chia theo nhóm trong `dimensions` để thấy "
+    "phần nào thay đổi."
+)
 
 
 def _time_column(dataset: dict[str, Any], metrics: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -38,7 +43,9 @@ def shaped_plan(
     - `trend`: split by the metrics' time column (unless it compares two periods), drawn as a line;
     - `ranking`: grouped, ordered by its first metric, highest first unless the model said otherwise;
     - `list` and `breakdown`: grouped; a breakdown drawn as bars;
-    - `comparison`: two sides to compare (another period, groups, or two metrics).
+    - `comparison`: two sides to compare (another period, groups, or two metrics);
+    - `correlation`: two metrics over the same points, split by time when the plan names no grouping;
+    - `diagnostic`: something to contrast (another period, or groups), never a bare figure.
     A plan on a dataset the catalog lacks is left for the plan check to refuse.
     """
     dataset = next((item for item in datasets if plan and item["id"] == plan.get("dataset_id")), None)
@@ -52,7 +59,19 @@ def shaped_plan(
     chosen = [metric for metric in metrics if metric["dataset_id"] == dataset["id"]]
     chosen = [metric for metric in chosen if metric["metric_id"] in (shaped.get("metric_ids") or [])]
 
-    if intent == "trend" and not shaped.get("comparison"):
+    if intent == "correlation":
+        if len(shaped.get("metric_ids") or []) < 2:
+            raise QueryPlanError(NEEDS_TWO_METRICS)
+        if not dimensions:
+            time_column = _time_column(dataset, chosen)
+            if time_column is None:
+                raise QueryPlanError(NEEDS_TWO_METRICS)
+            shaped["dimensions"] = [time_column["name"]]
+            changes.append(f"chia theo {time_column.get('label') or time_column['name']} để có các cặp giá trị")
+    elif intent == "diagnostic":
+        if not shaped.get("comparison") and not dimensions:
+            raise QueryPlanError(NEEDS_CONTRAST)
+    elif intent == "trend" and not shaped.get("comparison"):
         if not split_by_time:
             time_column = _time_column(dataset, chosen)
             if time_column is None:

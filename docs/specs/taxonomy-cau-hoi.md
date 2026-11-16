@@ -104,11 +104,11 @@ báo của Gartner.
 | `ranking` | Xếp hạng, cực trị | Find Extremum, Sort | "Ba thành phố nóng nhất tuần trước" | `order_by` + `limit` | `bar` | Có |
 | `trend` | Diễn biến theo thời gian | Characterize Distribution theo thời gian | "Độ ẩm ở Huế 7 ngày qua thay đổi thế nào?" | chiều thời gian + `time_grain` | `line` | Có |
 | `comparison` | So sánh nhóm hoặc kỳ | Compute Derived Value | "Lượng mưa tuần này so với tuần trước ở TP.HCM" | `comparison` hoặc chiều thực thể với `IN` | `bar` | Có |
-| `breakdown` | Phân rã, cơ cấu | Compute Derived Value | "Tổng lượng mưa tháng 10 theo từng vùng" | chiều phân rã | `bar` | Một phần: chưa tính tỷ trọng trên tổng |
+| `breakdown` | Phân rã, cơ cấu | Compute Derived Value | "Tổng lượng mưa tháng 10 theo từng vùng" | chiều phân rã | `bar` | Có: thêm cột tỷ trọng (%) khi metric cộng dồn được (SUM, COUNT) |
 | `range` | Khoảng và phân bố | Determine Range, Characterize Distribution | "Nhiệt độ ở Buôn Ma Thuột dao động trong khoảng nào tuần này?" | metric MIN và MAX | `table` | Một phần: cần metric MIN/MAX, chưa có histogram |
 | `anomaly` | Bất thường | Find Anomalies | "Có ngày nào mưa bất thường ở Vinh tháng này?" | bộ lọc từ expert rule định nghĩa "bất thường" | `table` | Một phần: qua expert rule |
-| `correlation` | Tương quan | Correlate | "Độ ẩm cao thì mưa có nhiều hơn không?" | hai metric theo cùng chiều thời gian | `scatter` | Chưa |
-| `diagnostic` | Giải thích nguyên nhân | Gartner: chẩn đoán | "Vì sao tuần này Hà Nội mưa nhiều hơn tuần trước?" | tách thành `comparison` + `breakdown`, không khẳng định nhân quả | nhiều khối | Chưa |
+| `correlation` | Tương quan | Correlate | "Độ ẩm cao thì mưa có nhiều hơn không?" | hai metric theo cùng chiều thời gian | `scatter` | Có: hệ số Pearson r giữa hai metric trên cùng các điểm |
+| `diagnostic` | Giải thích nguyên nhân | Gartner: chẩn đoán | "Vì sao tuần này Hà Nội mưa nhiều hơn tuần trước?" | tách thành `comparison` + `breakdown`, không khẳng định nhân quả | nhiều khối | Một phần: bắt buộc có kỳ hoặc nhóm để đối chiếu, câu trả lời không khẳng định nhân quả |
 | `forecast` | Dự báo | Gartner: dự báo | "Ngày mai Hải Phòng có mưa không?" | như `value`/`trend` trên ngày tương lai, chỉ dùng dữ liệu dự báo có sẵn | `number` / `line` | Có, với dữ liệu dự báo sẵn có |
 
 Không đưa vào:
@@ -132,10 +132,13 @@ truy vấn của từng ý định như cột "Kế hoạch truy vấn"). Sau kh
 | `ranking` | Không có `order_by` | Xếp theo metric đầu, cao xuống thấp |
 | `list`, `breakdown` | Không có `dimensions` | `invalid_plan`; `breakdown` đang là `number` thì thành `bar` |
 | `comparison` | Không `comparison`, không chiều, chỉ một metric | `invalid_plan`: không có gì để so |
+| `breakdown` | (sau khi chạy) | Metric có `aggregation` SUM hoặc COUNT (Semantic Layer suy ra từ biểu thức đã duyệt), bảng đủ và không âm: thêm cột `Tỷ trọng …` (%) trên tổng các nhóm (`chat/services/derived.py`) |
+| `correlation` | Ít hơn hai metric | `invalid_plan`; không có chiều thì chia theo cột thời gian của metric. Sau khi chạy: hệ số Pearson r giữa hai metric đầu, ghi chú mức độ, chiều và "không cho biết nguyên nhân" |
+| `diagnostic` | Không `comparison`, không chiều | `invalid_plan`: cần kỳ hoặc nhóm để đối chiếu; câu trả lời chỉ ra phần thay đổi nhiều nhất, không khẳng định nguyên nhân |
 
 Phần tự thêm được ghi vào đối số `shaped` của bước `query_metrics`, nên trajectory thấy được. `invalid_plan` đi vào vòng
 sửa của `docs/specs/xu-ly-loi-truy-van.md` như mọi kế hoạch không qua kiểm tra. Các ý định còn lại (`value`, `range`,
-`anomaly`, `correlation`, `diagnostic`, `forecast`) chỉ có hướng dẫn trong prompt, không bị nắn: một câu `value` đếm số
+`anomaly`, `forecast`) chỉ có hướng dẫn trong prompt, không bị nắn: một câu `value` đếm số
 ngày thoả điều kiện vẫn được nhóm theo ngày.
 
 ## 6. Trục 3: Cấu trúc câu hỏi và cách tách

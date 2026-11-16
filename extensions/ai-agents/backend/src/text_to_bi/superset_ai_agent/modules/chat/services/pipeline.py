@@ -24,6 +24,7 @@ from ...semantic_layer.services.data_model import DataModelSources
 from ...semantic_layer.services.metrics import catalog_metric
 from ..exceptions import QueryPlanError
 from . import prompts
+from .derived import with_correlation, with_shares
 from .formula import answers_anything, doubtful_result, told_formula
 from .intents import shaped_plan
 from .plausibility import implausible_values
@@ -1005,6 +1006,11 @@ def _answer_question(
             period = " – ".join(str(item["value"]) for item in kept_period)
             outcome.result["notes"] = [*outcome.result["notes"], f"Giữ khoảng thời gian của câu hỏi trước: {period}."]
 
+    if outcome.result is not None and outcome.intent == "breakdown":
+        aggregations = {metric["metric_name"]: metric.get("aggregation") for metric in catalog.metrics}
+        with_shares(outcome.result, aggregations)
+    if outcome.result is not None and outcome.intent == "correlation":
+        with_correlation(outcome.result)
     if outcome.result is not None:
         # A figure no data of its unit can be is shown with a warning, never stated as fact.
         suspicious = implausible_values(outcome.result)
